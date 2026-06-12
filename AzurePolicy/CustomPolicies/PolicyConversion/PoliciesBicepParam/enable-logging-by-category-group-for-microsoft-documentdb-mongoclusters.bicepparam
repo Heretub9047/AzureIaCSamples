@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '064a3695-3197-4354-816b-65c7b952db9e'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-documentdb-mongoclusters'
 
 param policydisplayName = 'Enable logging by category group for microsoft.documentdb/mongoclusters to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'c3b912c2-7f5b-47ac-bd52-8c85a7667961'
+param policyDefinitionName = 'enable-logging-by-category-group-for-volumes'
 
 param policydisplayName = 'Enable logging by category group for Volumes (microsoft.netapp/netappaccounts/capacitypools/volumes) to Log Analytics'
 

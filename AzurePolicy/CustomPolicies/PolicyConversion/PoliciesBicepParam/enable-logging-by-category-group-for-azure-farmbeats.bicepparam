@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'f969646f-b6b8-45a0-b736-bf9b4bb933dc'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-farmbeats'
 
 param policydisplayName = 'Enable logging by category group for Azure FarmBeats (microsoft.agfoodplatform/farmbeats) to Log Analytics'
 

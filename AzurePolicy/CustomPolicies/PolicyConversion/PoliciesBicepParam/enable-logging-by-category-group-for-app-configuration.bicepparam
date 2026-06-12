@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '4b05de63-3ad2-4f6d-b421-da21f1328f3b'
+param policyDefinitionName = 'enable-logging-by-category-group-for-app-configuration'
 
 param policydisplayName = 'Enable logging by category group for App Configuration (microsoft.appconfiguration/configurationstores) to Log Analytics'
 

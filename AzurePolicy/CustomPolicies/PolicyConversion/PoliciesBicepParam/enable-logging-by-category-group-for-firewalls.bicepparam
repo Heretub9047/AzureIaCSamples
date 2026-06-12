@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '5fcf46f9-194c-47ff-8889-380f57ae4617'
+param policyDefinitionName = 'enable-logging-by-category-group-for-firewalls'
 
 param policydisplayName = 'Enable logging by category group for Firewalls (microsoft.network/azurefirewalls) to Log Analytics'
 

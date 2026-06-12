@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '0277b2d5-6e6f-4d97-9929-a5c4eab56fd7'
+param policyDefinitionName = 'enable-logging-by-category-group-for-service-bus-namespaces'
 
 param policydisplayName = 'Enable logging by category group for Service Bus Namespaces (microsoft.servicebus/namespaces) to Log Analytics'
 

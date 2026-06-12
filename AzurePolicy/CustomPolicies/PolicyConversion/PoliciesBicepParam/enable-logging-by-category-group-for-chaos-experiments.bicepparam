@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '39078c44-b8d4-4c7d-8579-7f021d326ebf'
+param policyDefinitionName = 'enable-logging-by-category-group-for-chaos-experiments'
 
 param policydisplayName = 'Enable logging by category group for Chaos Experiments (microsoft.chaos/experiments) to Log Analytics'
 

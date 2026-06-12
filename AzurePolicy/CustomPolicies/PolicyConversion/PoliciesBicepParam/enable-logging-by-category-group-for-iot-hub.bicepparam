@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '614d9fbd-68cd-4832-96db-3362069661b2'
+param policyDefinitionName = 'enable-logging-by-category-group-for-iot-hub'
 
 param policydisplayName = 'Enable logging by category group for IoT Hub (microsoft.devices/iothubs) to Log Analytics'
 

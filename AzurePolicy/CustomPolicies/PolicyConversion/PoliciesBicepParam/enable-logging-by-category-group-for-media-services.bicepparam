@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '69214fad-6742-49a9-8f71-ee9d269364ab'
+param policyDefinitionName = 'enable-logging-by-category-group-for-media-services'
 
 param policydisplayName = 'Enable logging by category group for Media Services (microsoft.media/mediaservices) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'fc2bb2e1-739a-4a03-86a2-16ad55e90bd9'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-powerbi-tenants-workspaces'
 
 param policydisplayName = 'Enable logging by category group for microsoft.powerbi/tenants/workspaces to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '0ba93a1b-ac4d-4e7b-976a-548a18be1e52'
+param policyDefinitionName = 'enable-logging-by-category-group-for-experiment-workspaces'
 
 param policydisplayName = 'Enable logging by category group for Experiment Workspaces (microsoft.experimentation/experimentworkspaces) to Log Analytics'
 

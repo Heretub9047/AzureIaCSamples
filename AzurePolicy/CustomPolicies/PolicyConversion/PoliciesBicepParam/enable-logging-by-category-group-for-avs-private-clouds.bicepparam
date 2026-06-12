@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '69ab8bfc-dc5b-443d-93a7-7531551dec66'
+param policyDefinitionName = 'enable-logging-by-category-group-for-avs-private-clouds'
 
 param policydisplayName = 'Enable logging by category group for AVS Private clouds (microsoft.avs/privateclouds) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '234bbd1b-05f6-4639-8770-1cd5278ba2c9'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-autonomousdevelopmentplatform-workspaces'
 
 param policydisplayName = 'Enable logging by category group for microsoft.autonomousdevelopmentplatform/workspaces to Log Analytics'
 

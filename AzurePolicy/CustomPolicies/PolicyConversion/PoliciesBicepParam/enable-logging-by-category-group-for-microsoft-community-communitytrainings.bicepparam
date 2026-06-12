@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '0509e2d8-d657-4563-a7c8-b88b9180a6e8'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-community-communitytrainings'
 
 param policydisplayName = 'Enable logging by category group for microsoft.community/communitytrainings to Log Analytics'
 

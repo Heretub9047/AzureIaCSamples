@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'a271e156-b295-4537-b01d-09675d9e7851'
+param policyDefinitionName = 'enable-logging-by-category-group-for-dedicated-sql-pools'
 
 param policydisplayName = 'Enable logging by category group for Dedicated SQL pools (microsoft.synapse/workspaces/sqlpools) to Log Analytics'
 

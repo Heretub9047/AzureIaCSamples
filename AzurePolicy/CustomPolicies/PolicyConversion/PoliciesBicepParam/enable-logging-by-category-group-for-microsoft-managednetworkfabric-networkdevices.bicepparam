@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'd7d59290-3ee5-4c1b-b408-c38b21799aea'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-managednetworkfabric-networkdevices'
 
 param policydisplayName = 'Enable logging by category group for microsoft.managednetworkfabric/networkdevices to Log Analytics'
 

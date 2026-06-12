@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'a9725bd4-a2ad-479f-a29b-5e163cada399'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-networkcloud-baremetalmachines'
 
 param policydisplayName = 'Enable logging by category group for microsoft.networkcloud/baremetalmachines to Log Analytics'
 

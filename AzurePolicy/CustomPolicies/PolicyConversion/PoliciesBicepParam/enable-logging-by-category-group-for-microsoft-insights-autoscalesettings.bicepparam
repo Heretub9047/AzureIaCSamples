@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '30499756-47d6-493c-9e57-ee3db2d9fa96'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-insights-autoscalesettings'
 
 param policydisplayName = 'Enable logging by category group for microsoft.insights/autoscalesettings to Log Analytics'
 

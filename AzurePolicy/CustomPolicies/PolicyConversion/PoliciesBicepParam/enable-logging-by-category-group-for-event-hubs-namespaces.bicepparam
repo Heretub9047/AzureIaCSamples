@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '441af8bf-7c88-4efc-bd24-b7be28d4acce'
+param policyDefinitionName = 'enable-logging-by-category-group-for-event-hubs-namespaces'
 
 param policydisplayName = 'Enable logging by category group for Event Hubs Namespaces (microsoft.eventhub/namespaces) to Log Analytics'
 

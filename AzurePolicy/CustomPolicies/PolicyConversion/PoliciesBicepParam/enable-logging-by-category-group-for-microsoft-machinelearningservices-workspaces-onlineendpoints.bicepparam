@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '5cfb9e8a-2f13-40bd-a527-c89bc596d299'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-machinelearningservices-workspaces-onlineendpoints'
 
 param policydisplayName = 'Enable logging by category group for microsoft.machinelearningservices/workspaces/onlineendpoints to Log Analytics'
 

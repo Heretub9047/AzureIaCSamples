@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '1118afbc-c48d-43ae-931a-87b38956d40b'
+param policyDefinitionName = 'enable-logging-by-category-group-for-traffic-manager-profiles'
 
 param policydisplayName = 'Enable logging by category group for Traffic Manager profiles (microsoft.network/trafficmanagerprofiles) to Log Analytics'
 

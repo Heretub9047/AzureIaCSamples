@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '69e0da8f-ca50-479d-b1a8-33a31426c512'
+param policyDefinitionName = 'enable-logging-by-category-group-for-notification-hub-namespaces'
 
 param policydisplayName = 'Enable logging by category group for Notification Hub Namespaces (microsoft.notificationhubs/namespaces) to Log Analytics'
 

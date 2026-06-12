@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'eb2fea88-fa7b-4531-a4c1-428c618fbcc8'
+param policyDefinitionName = 'enable-logging-by-category-group-for-fhir-service'
 
 param policydisplayName = 'Enable logging by category group for FHIR service (microsoft.healthcareapis/workspaces/fhirservices) to Log Analytics'
 

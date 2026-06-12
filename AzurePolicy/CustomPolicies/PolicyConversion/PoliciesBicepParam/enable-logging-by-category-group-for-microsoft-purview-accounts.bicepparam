@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '4cabf9fc-4ed1-4990-bbaf-7248fb8751bc'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-purview-accounts'
 
 param policydisplayName = 'Enable logging by category group for Microsoft Purview accounts (microsoft.purview/accounts) to Log Analytics'
 

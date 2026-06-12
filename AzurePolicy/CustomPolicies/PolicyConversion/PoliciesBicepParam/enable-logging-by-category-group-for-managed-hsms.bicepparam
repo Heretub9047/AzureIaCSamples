@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'b88bfd90-4da5-43eb-936f-ae1481924291'
+param policyDefinitionName = 'enable-logging-by-category-group-for-managed-hsms'
 
 param policydisplayName = 'Enable logging by category group for Managed HSMs (microsoft.keyvault/managedhsms) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'f0d25196-1ea4-49e1-ad53-ccada27b4862'
+param policyDefinitionName = 'enable-logging-by-category-group-for-dicom-service'
 
 param policydisplayName = 'Enable logging by category group for DICOM service (microsoft.healthcareapis/workspaces/dicomservices) to Log Analytics'
 

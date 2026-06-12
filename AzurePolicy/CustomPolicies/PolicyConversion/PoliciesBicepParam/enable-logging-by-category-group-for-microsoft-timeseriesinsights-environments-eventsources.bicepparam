@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'a83fcddb-39d0-4c21-af38-76d2c935c3ca'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-timeseriesinsights-environments-eventsources'
 
 param policydisplayName = 'Enable logging by category group for microsoft.timeseriesinsights/environments/eventsources to Log Analytics'
 

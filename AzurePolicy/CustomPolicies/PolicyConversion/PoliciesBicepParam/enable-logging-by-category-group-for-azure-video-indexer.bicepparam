@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'a1a5f3c5-d01a-459c-8398-a3c9a79ad879'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-video-indexer'
 
 param policydisplayName = 'Enable logging by category group for Azure Video Indexer (microsoft.videoindexer/accounts) to Log Analytics'
 

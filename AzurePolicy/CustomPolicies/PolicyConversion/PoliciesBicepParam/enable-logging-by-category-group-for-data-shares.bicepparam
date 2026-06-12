@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'ed251afd-72b1-4e41-b6c9-6614420f1207'
+param policyDefinitionName = 'enable-logging-by-category-group-for-data-shares'
 
 param policydisplayName = 'Enable logging by category group for Data Shares (microsoft.datashare/accounts) to Log Analytics'
 

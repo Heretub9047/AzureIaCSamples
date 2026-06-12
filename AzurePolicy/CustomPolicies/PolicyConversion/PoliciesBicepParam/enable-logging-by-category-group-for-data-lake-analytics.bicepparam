@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'd111f33e-5cb3-414e-aec4-427e7d1080c9'
+param policyDefinitionName = 'enable-logging-by-category-group-for-data-lake-analytics'
 
 param policydisplayName = 'Enable logging by category group for Data Lake Analytics (microsoft.datalakeanalytics/accounts) to Log Analytics'
 

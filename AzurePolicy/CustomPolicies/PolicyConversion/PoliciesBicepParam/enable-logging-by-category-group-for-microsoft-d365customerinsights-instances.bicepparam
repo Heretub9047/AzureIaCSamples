@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '167dbbbc-a03a-4ebe-8e46-c34cc67f7d9d'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-d365customerinsights-instances'
 
 param policydisplayName = 'Enable logging by category group for microsoft.d365customerinsights/instances to Log Analytics'
 

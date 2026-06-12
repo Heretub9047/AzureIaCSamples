@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '867c08d5-bc47-404d-9a1b-0aec7a8d34eb'
+param policyDefinitionName = 'enable-logging-by-category-group-for-workspaces'
 
 param policydisplayName = 'Enable logging by category group for Workspaces (microsoft.desktopvirtualization/workspaces) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '7a8afaba-cc24-4306-b83f-d178f1a10ba2'
+param policyDefinitionName = 'enable-logging-by-category-group-for-power-bi-embedded'
 
 param policydisplayName = 'Enable logging by category group for Power BI Embedded (microsoft.powerbidedicated/capacities) to Log Analytics'
 

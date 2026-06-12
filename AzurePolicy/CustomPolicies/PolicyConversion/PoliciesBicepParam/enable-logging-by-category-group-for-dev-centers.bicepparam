@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '82b076b9-2062-4516-ae4c-37b1890eabb2'
+param policyDefinitionName = 'enable-logging-by-category-group-for-dev-centers'
 
 param policydisplayName = 'Enable logging by category group for Dev centers (microsoft.devcenter/devcenters) to Log Analytics'
 

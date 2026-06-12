@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'f62b9eab-b489-4388-9874-b0a62ca31327'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-database-for-mariadb-servers'
 
 param policydisplayName = 'Enable logging by category group for Azure Database for MariaDB servers (microsoft.dbformariadb/servers) to Log Analytics'
 

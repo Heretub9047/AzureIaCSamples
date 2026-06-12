@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '6b359d8f-f88d-4052-aa7c-32015963ecc1'
+param policyDefinitionName = 'enable-logging-by-category-group-for-key-vaults'
 
 param policydisplayName = 'Enable logging by category group for Key vaults (microsoft.keyvault/vaults) to Log Analytics'
 

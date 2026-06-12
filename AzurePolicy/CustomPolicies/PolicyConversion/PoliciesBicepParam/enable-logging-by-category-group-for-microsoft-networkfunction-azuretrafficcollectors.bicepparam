@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '60579569-3633-42cb-ae6a-195080bf310d'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-networkfunction-azuretrafficcollectors'
 
 param policydisplayName = 'Enable logging by category group for microsoft.networkfunction/azuretrafficcollectors to Log Analytics'
 

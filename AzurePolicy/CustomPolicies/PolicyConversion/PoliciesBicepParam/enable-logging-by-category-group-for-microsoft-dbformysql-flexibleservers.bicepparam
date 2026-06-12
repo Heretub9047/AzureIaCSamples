@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '7860f3fe-0db3-42d4-bf3d-7042ea5e5787'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-dbformysql-flexibleservers'
 
 param policydisplayName = 'Enable logging by category group for microsoft.dbformysql/flexibleservers to Log Analytics'
 

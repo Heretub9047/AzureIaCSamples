@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'e1bf4d43-542a-4410-918d-7e61c8e1ac21'
+param policyDefinitionName = 'enable-logging-by-category-group-for-event-grid-partner-topics'
 
 param policydisplayName = 'Enable logging by category group for Event Grid Partner Topics (microsoft.eventgrid/partnertopics) to Log Analytics'
 

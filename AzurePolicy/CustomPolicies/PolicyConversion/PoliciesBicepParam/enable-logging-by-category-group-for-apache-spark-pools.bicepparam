@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '29565b0a-e1b5-49c1-94bf-b8b258656460'
+param policyDefinitionName = 'enable-logging-by-category-group-for-apache-spark-pools'
 
 param policydisplayName = 'Enable logging by category group for Apache Spark pools (microsoft.synapse/workspaces/bigdatapools) to Log Analytics'
 

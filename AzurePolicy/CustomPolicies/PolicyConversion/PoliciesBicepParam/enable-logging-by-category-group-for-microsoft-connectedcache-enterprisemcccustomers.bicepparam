@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'c13b41e7-a45f-4600-96c0-18f84fb07771'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-connectedcache-enterprisemcccustomers'
 
 param policydisplayName = 'Enable logging by category group for microsoft.connectedcache/enterprisemcccustomers to Log Analytics'
 

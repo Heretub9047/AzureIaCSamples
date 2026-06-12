@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'a7c668bd-3327-474f-8fb5-8146e3e40e40'
+param policyDefinitionName = 'enable-logging-by-category-group-for-host-pools'
 
 param policydisplayName = 'Enable logging by category group for Host pools (microsoft.desktopvirtualization/hostpools) to Log Analytics'
 

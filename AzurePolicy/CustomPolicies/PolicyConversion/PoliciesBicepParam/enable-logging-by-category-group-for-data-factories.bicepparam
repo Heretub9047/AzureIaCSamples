@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '751f9297-5aae-4313-af2d-2a89226a7856'
+param policyDefinitionName = 'enable-logging-by-category-group-for-data-factories'
 
 param policydisplayName = 'Enable logging by category group for Data factories (V2) (microsoft.datafactory/factories) to Log Analytics'
 

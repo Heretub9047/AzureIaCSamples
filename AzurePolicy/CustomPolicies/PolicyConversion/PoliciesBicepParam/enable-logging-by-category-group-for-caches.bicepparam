@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'fa570aa1-acca-4eea-8e5a-233cf2c5e4c2'
+param policyDefinitionName = 'enable-logging-by-category-group-for-caches'
 
 param policydisplayName = 'Enable logging by category group for Caches (microsoft.cache/redisenterprise/databases) to Log Analytics'
 

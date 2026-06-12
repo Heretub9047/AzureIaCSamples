@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '8def4bdd-4362-4ed6-a26f-7bf8f2c58839'
+param policyDefinitionName = 'enable-logging-by-category-group-for-search-services'
 
 param policydisplayName = 'Enable logging by category group for Search services (microsoft.search/searchservices) to Log Analytics'
 

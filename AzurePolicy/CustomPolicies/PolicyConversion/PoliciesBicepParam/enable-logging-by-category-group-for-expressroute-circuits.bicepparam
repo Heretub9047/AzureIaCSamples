@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'c5ecf495-6caa-445c-b431-04fda56c555a'
+param policyDefinitionName = 'enable-logging-by-category-group-for-expressroute-circuits'
 
 param policydisplayName = 'Enable logging by category group for ExpressRoute circuits (microsoft.network/expressroutecircuits) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'b6f29e6b-4b21-4bb6-a997-38592fa02864'
+param policyDefinitionName = 'enable-logging-by-category-group-for-managed-ccf-apps'
 
 param policydisplayName = 'Enable logging by category group for Managed CCF Apps (microsoft.confidentialledger/managedccfs) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '818719e5-1338-4776-9a9d-3c31e4df5986'
+param policyDefinitionName = 'enable-logging-by-category-group-for-log-analytics-workspaces'
 
 param policydisplayName = 'Enable logging by category group for Log Analytics workspaces (microsoft.operationalinsights/workspaces) to Log Analytics'
 

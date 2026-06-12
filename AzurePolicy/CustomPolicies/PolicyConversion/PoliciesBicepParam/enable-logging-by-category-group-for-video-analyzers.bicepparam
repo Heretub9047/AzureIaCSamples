@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '34c7546c-d637-4b5d-96ab-93fb6ed07af8'
+param policyDefinitionName = 'enable-logging-by-category-group-for-video-analyzers'
 
 param policydisplayName = 'Enable logging by category group for Video Analyzers (microsoft.media/videoanalyzers) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'cac9e1c5-c3cb-47fa-8d4c-88b8559262d2'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-network-p2svpngateways'
 
 param policydisplayName = 'Enable logging by category group for microsoft.network/p2svpngateways to Log Analytics'
 

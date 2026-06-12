@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'be26ca28-761d-4538-b78a-975eb47c680c'
+param policyDefinitionName = 'enable-logging-by-category-group-for-streaming-endpoints'
 
 param policydisplayName = 'Enable logging by category group for Streaming Endpoints (microsoft.media/mediaservices/streamingendpoints) to Log Analytics'
 

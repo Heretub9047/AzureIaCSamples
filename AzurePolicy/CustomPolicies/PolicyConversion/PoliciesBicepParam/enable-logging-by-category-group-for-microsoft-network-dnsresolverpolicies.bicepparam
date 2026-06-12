@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'dc1b5908-da05-4eed-a988-c5e32fdb682d'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-network-dnsresolverpolicies'
 
 param policydisplayName = 'Enable logging by category group for microsoft.network/dnsresolverpolicies to Log Analytics'
 

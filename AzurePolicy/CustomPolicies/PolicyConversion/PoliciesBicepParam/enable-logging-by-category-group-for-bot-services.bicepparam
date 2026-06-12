@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '415eaa04-e9db-476a-ba43-092d70ebe1e7'
+param policyDefinitionName = 'enable-logging-by-category-group-for-bot-services'
 
 param policydisplayName = 'Enable logging by category group for Bot Services (microsoft.botservice/botservices) to Log Analytics'
 

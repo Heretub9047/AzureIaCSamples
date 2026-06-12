@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '99b3bfad-aef0-476d-ae98-40861f8eae22'
+param policyDefinitionName = 'enable-logging-by-category-group-for-application-groups'
 
 param policydisplayName = 'Enable logging by category group for Application groups (microsoft.desktopvirtualization/applicationgroups) to Log Analytics'
 

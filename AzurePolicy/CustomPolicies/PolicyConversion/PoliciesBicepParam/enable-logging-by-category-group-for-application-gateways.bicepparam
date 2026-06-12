@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '92012204-a7e4-4a95-bbe5-90d0d3e12735'
+param policyDefinitionName = 'enable-logging-by-category-group-for-application-gateways'
 
 param policydisplayName = 'Enable logging by category group for Application gateways (microsoft.network/applicationgateways) to Log Analytics'
 

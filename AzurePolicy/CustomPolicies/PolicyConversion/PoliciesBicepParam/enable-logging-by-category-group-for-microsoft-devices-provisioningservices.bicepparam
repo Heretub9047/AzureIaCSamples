@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '041e904a-33e5-45fd-b3f6-4ac95f1f8761'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-devices-provisioningservices'
 
 param policydisplayName = 'Enable logging by category group for microsoft.devices/provisioningservices to Log Analytics'
 

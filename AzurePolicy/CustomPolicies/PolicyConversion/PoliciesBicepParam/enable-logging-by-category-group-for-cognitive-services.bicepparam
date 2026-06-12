@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '55d1f543-d1b0-4811-9663-d6d0dbc6326d'
+param policyDefinitionName = 'enable-logging-by-category-group-for-cognitive-services'
 
 param policydisplayName = 'Enable logging by category group for Cognitive Services (microsoft.cognitiveservices/accounts) to Log Analytics'
 

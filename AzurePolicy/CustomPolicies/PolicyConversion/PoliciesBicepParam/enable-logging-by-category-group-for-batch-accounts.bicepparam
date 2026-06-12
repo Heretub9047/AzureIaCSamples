@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '9fcae8ed-246a-407b-8f75-f3500ff2c9db'
+param policyDefinitionName = 'enable-logging-by-category-group-for-batch-accounts'
 
 param policydisplayName = 'Enable logging by category group for Batch accounts (microsoft.batch/batchaccounts) to Log Analytics'
 

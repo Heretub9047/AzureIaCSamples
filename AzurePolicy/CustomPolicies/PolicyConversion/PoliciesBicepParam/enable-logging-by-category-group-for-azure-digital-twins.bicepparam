@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '4c9cd884-3e45-4588-ac9d-00d44be2cbcd'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-digital-twins'
 
 param policydisplayName = 'Enable logging by category group for Azure Digital Twins (microsoft.digitaltwins/digitaltwinsinstances) to Log Analytics'
 

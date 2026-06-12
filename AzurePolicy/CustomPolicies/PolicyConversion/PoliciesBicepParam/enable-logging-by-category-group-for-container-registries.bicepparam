@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '56288eb2-4350-461d-9ece-2bb242269dce'
+param policyDefinitionName = 'enable-logging-by-category-group-for-container-registries'
 
 param policydisplayName = 'Enable logging by category group for Container registries (microsoft.containerregistry/registries) to Log Analytics'
 

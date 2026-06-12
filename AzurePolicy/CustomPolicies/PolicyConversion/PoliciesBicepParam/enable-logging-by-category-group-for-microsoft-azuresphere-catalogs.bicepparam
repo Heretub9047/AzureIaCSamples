@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'bbf47f27-95e4-46a0-82e1-898ce046d857'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-azuresphere-catalogs'
 
 param policydisplayName = 'Enable logging by category group for microsoft.azuresphere/catalogs to Log Analytics'
 

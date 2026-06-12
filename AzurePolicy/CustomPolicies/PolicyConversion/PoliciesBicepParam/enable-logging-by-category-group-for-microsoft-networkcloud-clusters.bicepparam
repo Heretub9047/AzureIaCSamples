@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '63a8eb0d-f030-4bc6-a1e4-6998f23aa160'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-networkcloud-clusters'
 
 param policydisplayName = 'Enable logging by category group for microsoft.networkcloud/clusters to Log Analytics'
 

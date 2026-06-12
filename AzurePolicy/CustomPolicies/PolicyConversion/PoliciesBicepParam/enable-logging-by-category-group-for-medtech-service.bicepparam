@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '557c828f-aa51-40d9-868a-cff8d3982818'
+param policyDefinitionName = 'enable-logging-by-category-group-for-medtech-service'
 
 param policydisplayName = 'Enable logging by category group for MedTech service (microsoft.healthcareapis/workspaces/iotconnectors) to Log Analytics'
 

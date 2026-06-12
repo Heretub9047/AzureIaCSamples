@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '56ae9f08-b8c9-4a0f-8f58-5dbcd63bef84'
+param policyDefinitionName = 'enable-logging-by-category-group-for-relays'
 
 param policydisplayName = 'Enable logging by category group for Relays (microsoft.relay/namespaces) to Log Analytics'
 

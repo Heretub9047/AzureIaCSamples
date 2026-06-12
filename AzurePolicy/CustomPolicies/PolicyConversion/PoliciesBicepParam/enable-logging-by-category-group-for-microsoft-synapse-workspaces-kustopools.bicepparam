@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '887dc342-c6bd-418b-9407-ab0e27deba36'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-synapse-workspaces-kustopools'
 
 param policydisplayName = 'Enable logging by category group for microsoft.synapse/workspaces/kustopools to Log Analytics'
 

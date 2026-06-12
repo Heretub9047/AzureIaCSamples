@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '1840aef8-71df-4a30-a108-efdb4f291a7f'
+param policyDefinitionName = 'enable-logging-by-category-group-for-integration-accounts'
 
 param policydisplayName = 'Enable logging by category group for Integration accounts (microsoft.logic/integrationaccounts) to Log Analytics'
 

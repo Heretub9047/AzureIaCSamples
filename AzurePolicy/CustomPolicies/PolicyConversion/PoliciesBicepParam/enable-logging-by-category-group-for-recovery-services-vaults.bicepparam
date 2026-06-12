@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '2f4d1c08-3695-41a7-a0a0-8db4a0e25233'
+param policyDefinitionName = 'enable-logging-by-category-group-for-recovery-services-vaults'
 
 param policydisplayName = 'Enable logging by category group for Recovery Services vaults (microsoft.recoveryservices/vaults) to Log Analytics'
 

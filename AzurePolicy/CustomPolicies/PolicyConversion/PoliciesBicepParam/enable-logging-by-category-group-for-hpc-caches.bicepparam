@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '3d28ea18-8e88-4160-96ff-4b6af4fd94c7'
+param policyDefinitionName = 'enable-logging-by-category-group-for-hpc-caches'
 
 param policydisplayName = 'Enable logging by category group for HPC caches (microsoft.storagecache/caches) to Log Analytics'
 

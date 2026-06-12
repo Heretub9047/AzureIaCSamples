@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '75a112bc-759f-4f29-83cc-799019db39c3'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-load-testing'
 
 param policydisplayName = 'Enable logging by category group for Azure Load Testing (microsoft.loadtestservice/loadtests) to Log Analytics'
 

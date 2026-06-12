@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'aade2723-e7f6-46fd-b1dc-e6c2c7f7edc4'
+param policyDefinitionName = 'enable-logging-by-category-group-for-1es-hosted-pools'
 
 param policydisplayName = 'Enable logging by category group for 1ES Hosted Pools (microsoft.cloudtest/hostedpools) to Log Analytics'
 

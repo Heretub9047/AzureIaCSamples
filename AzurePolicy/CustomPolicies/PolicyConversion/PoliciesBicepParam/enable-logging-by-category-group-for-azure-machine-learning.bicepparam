@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '90c90eda-bfe7-4c67-bf26-410420ed1047'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-machine-learning'
 
 param policydisplayName = 'Enable logging by category group for Azure Machine Learning (microsoft.machinelearningservices/workspaces) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'b55f2e8e-dc76-4262-a0e3-45f02200ff0e'
+param policyDefinitionName = 'enable-logging-by-category-group-for-public-ip-prefixes'
 
 param policydisplayName = 'Enable logging by category group for Public IP Prefixes (microsoft.network/publicipprefixes) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '5d487647-6a53-4839-8eb8-edccf5e6bf1d'
+param policyDefinitionName = 'enable-logging-by-category-group-for-live-events'
 
 param policydisplayName = 'Enable logging by category group for Live events (microsoft.media/mediaservices/liveevents) to Log Analytics'
 

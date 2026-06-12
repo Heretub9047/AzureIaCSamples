@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '5fbd326d-328c-414e-a922-2d6963998962'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-dbforpostgresql-flexibleservers'
 
 param policydisplayName = 'Enable logging by category group for microsoft.dbforpostgresql/flexibleservers to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'e9c56c41-d453-4a80-af93-2331afeb3d82'
+param policyDefinitionName = 'enable-logging-by-category-group-for-front-door-and-cdn-profiles-2'
 
 param policydisplayName = 'Enable logging by category group for Front Door and CDN profiles (microsoft.network/frontdoors) to Log Analytics'
 

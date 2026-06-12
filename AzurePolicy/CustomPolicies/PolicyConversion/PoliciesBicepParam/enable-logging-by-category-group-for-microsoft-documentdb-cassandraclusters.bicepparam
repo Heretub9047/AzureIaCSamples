@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'ae0fc3d3-c9ce-43e8-923a-a143db56d81e'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-documentdb-cassandraclusters'
 
 param policydisplayName = 'Enable logging by category group for microsoft.documentdb/cassandraclusters to Log Analytics'
 

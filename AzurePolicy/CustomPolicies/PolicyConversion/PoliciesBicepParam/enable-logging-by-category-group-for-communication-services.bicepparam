@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'acbb9698-46bd-4800-89da-e3473c4ab10d'
+param policyDefinitionName = 'enable-logging-by-category-group-for-communication-services'
 
 param policydisplayName = 'Enable logging by category group for Communication Services (microsoft.communication/communicationservices) to Log Analytics'
 

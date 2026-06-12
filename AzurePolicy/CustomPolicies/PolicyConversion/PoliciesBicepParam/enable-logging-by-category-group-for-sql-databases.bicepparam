@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '6567d3f3-42d0-4cfb-9606-9741ba60fa07'
+param policyDefinitionName = 'enable-logging-by-category-group-for-sql-databases'
 
 param policydisplayName = 'Enable logging by category group for SQL databases (microsoft.sql/servers/databases) to Log Analytics'
 

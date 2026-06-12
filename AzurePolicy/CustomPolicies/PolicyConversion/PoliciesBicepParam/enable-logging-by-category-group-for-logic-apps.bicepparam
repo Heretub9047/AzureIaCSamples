@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '63d1a629-735c-448b-b45f-5e3865e84cf5'
+param policyDefinitionName = 'enable-logging-by-category-group-for-logic-apps'
 
 param policydisplayName = 'Enable logging by category group for Logic apps (microsoft.logic/workflows) to Log Analytics'
 

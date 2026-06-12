@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'e74570cf-1b7d-4bed-b79e-d1fd1117a39a'
+param policyDefinitionName = 'enable-logging-by-category-group-for-endpoints'
 
 param policydisplayName = 'Enable logging by category group for Endpoints (microsoft.cdn/profiles/endpoints) to Log Analytics'
 

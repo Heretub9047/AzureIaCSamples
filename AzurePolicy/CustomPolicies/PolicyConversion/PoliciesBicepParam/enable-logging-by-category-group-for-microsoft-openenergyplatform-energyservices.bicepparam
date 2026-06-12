@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '14ed86b4-ea45-4b1b-98a5-eb8f5f7da726'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-openenergyplatform-energyservices'
 
 param policydisplayName = 'Enable logging by category group for microsoft.openenergyplatform/energyservices to Log Analytics'
 

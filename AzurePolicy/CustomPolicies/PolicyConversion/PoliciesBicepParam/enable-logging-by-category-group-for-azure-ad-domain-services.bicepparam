@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '1bd91eae-4429-4f23-b780-8c9622e023e3'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-ad-domain-services'
 
 param policydisplayName = 'Enable logging by category group for Azure AD Domain Services (microsoft.aad/domainservices) to Log Analytics'
 

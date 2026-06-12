@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '1568dd08-cca0-4073-bfd8-e08a7fdc543e'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-workloads-sapvirtualinstances'
 
 param policydisplayName = 'Enable logging by category group for microsoft.workloads/sapvirtualinstances to Log Analytics'
 

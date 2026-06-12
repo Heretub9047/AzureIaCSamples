@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '2fbd2ca9-e7b2-47a0-a8b2-575f3f7607d4'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-cdn-cdnwebapplicationfirewallpolicies'
 
 param policydisplayName = 'Enable logging by category group for microsoft.cdn/cdnwebapplicationfirewallpolicies to Log Analytics'
 

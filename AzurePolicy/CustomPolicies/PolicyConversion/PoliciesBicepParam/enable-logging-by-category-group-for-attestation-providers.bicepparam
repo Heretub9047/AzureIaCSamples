@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '856331d3-0169-4dd9-9b04-cbb2ad3d1cf2'
+param policyDefinitionName = 'enable-logging-by-category-group-for-attestation-providers'
 
 param policydisplayName = 'Enable logging by category group for Attestation providers (microsoft.attestation/attestationproviders) to Log Analytics'
 

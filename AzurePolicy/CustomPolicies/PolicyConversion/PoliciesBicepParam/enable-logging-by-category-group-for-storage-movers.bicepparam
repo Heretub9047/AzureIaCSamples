@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'e99ab54f-260e-4925-a70f-8fe0a92443ef'
+param policyDefinitionName = 'enable-logging-by-category-group-for-storage-movers'
 
 param policydisplayName = 'Enable logging by category group for Storage movers (microsoft.storagemover/storagemovers) to Log Analytics'
 

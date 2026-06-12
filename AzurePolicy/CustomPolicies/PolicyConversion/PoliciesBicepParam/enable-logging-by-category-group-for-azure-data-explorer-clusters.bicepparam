@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'a819f227-229d-44cb-8ad6-25becdb4451f'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-data-explorer-clusters'
 
 param policydisplayName = 'Enable logging by category group for Azure Data Explorer Clusters (microsoft.kusto/clusters) to Log Analytics'
 

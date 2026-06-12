@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '68ba9fc9-71b9-4e6f-9cf5-ecc07722324c'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-cosmos-db-accounts'
 
 param policydisplayName = 'Enable logging by category group for Azure Cosmos DB accounts (microsoft.documentdb/databaseaccounts) to Log Analytics'
 

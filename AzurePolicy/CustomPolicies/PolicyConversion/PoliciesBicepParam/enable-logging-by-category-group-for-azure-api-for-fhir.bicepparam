@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'e25bcb29-0412-42c3-a526-1ff794310a1e'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-api-for-fhir'
 
 param policydisplayName = 'Enable logging by category group for Azure API for FHIR (microsoft.healthcareapis/services) to Log Analytics'
 

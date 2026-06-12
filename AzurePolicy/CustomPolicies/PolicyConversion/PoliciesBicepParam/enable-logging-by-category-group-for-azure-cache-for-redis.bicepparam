@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'aec4c33f-2f2a-4fd3-91cd-24a939513c60'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-cache-for-redis'
 
 param policydisplayName = 'Enable logging by category group for Azure Cache for Redis (microsoft.cache/redis) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '79494980-ea12-4ca1-8cca-317e942b6da2'
+param policyDefinitionName = 'enable-logging-by-category-group-for-application-insights'
 
 param policydisplayName = 'Enable logging by category group for Application Insights (microsoft.insights/components) to Log Analytics'
 

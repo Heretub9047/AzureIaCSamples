@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '958060c2-8d8e-478e-b3ec-d3d2249b461c'
+param policyDefinitionName = 'enable-logging-by-category-group-for-code-signing-accounts'
 
 param policydisplayName = 'Enable logging by category group for Code Signing Accounts (microsoft.codesigning/codesigningaccounts) to Log Analytics'
 

@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '889bfebf-7428-426e-a86f-79e2a7de2f71'
+param policyDefinitionName = 'enable-logging-by-category-group-for-load-balancers'
 
 param policydisplayName = 'Enable logging by category group for Load balancers (microsoft.network/loadbalancers) to Log Analytics'
 

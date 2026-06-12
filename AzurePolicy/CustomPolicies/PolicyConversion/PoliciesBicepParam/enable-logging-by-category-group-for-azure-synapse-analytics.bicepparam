@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '305408ed-dd5a-43b9-80c1-9eea87a176bb'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-synapse-analytics'
 
 param policydisplayName = 'Enable logging by category group for Azure Synapse Analytics (microsoft.synapse/workspaces) to Log Analytics'
 

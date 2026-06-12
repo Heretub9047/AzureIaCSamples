@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '041fdf14-0dd4-4ce0-83ff-de5456be0c85'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-database-for-mysql-servers'
 
 param policydisplayName = 'Enable logging by category group for Azure Database for MySQL servers (microsoft.dbformysql/servers) to Log Analytics'
 

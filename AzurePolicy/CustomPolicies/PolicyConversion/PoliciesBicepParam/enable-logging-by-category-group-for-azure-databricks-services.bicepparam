@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '454c7d4b-c141-43f1-8c81-975ebb15a9b5'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-databricks-services'
 
 param policydisplayName = 'Enable logging by category group for Azure Databricks Services (microsoft.databricks/workspaces) to Log Analytics'
 

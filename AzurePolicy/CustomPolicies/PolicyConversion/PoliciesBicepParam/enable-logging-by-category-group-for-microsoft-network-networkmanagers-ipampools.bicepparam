@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '6ee1c58c-a123-4cd6-8643-48b2f7ffb3e1'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-network-networkmanagers-ipampools'
 
 param policydisplayName = 'Enable logging by category group for microsoft.network/networkmanagers/ipampools to Log Analytics'
 

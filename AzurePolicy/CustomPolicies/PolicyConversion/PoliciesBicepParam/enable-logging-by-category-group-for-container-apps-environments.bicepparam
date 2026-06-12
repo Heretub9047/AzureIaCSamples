@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '6a664864-e2b5-413e-b930-f11caa132f16'
+param policyDefinitionName = 'enable-logging-by-category-group-for-container-apps-environments'
 
 param policydisplayName = 'Enable logging by category group for Container Apps Environments (microsoft.app/managedenvironments) to Log Analytics'
 

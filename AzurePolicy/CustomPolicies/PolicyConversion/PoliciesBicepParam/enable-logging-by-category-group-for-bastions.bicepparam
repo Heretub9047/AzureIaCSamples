@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'f8352124-56fa-4f94-9441-425109cdc14b'
+param policyDefinitionName = 'enable-logging-by-category-group-for-bastions'
 
 param policydisplayName = 'Enable logging by category group for Bastions (microsoft.network/bastionhosts) to Log Analytics'
 

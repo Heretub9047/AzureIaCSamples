@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '2453e322-a7e5-4905-ba1e-ac6ea60ff808'
+param policyDefinitionName = 'enable-logging-by-category-group-for-stream-analytics-jobs'
 
 param policydisplayName = 'Enable logging by category group for Stream Analytics jobs (microsoft.streamanalytics/streamingjobs) to Log Analytics'
 

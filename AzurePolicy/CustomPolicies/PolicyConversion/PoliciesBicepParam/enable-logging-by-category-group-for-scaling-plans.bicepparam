@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '8ea88471-98e1-47e4-9f63-838c990ba2f4'
+param policyDefinitionName = 'enable-logging-by-category-group-for-scaling-plans'
 
 param policydisplayName = 'Enable logging by category group for Scaling plans (microsoft.desktopvirtualization/scalingplans) to Log Analytics'
 

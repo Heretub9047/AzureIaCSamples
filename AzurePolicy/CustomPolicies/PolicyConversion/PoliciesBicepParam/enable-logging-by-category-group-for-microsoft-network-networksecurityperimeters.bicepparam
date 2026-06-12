@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '0ebe872d-7029-4292-88bc-ad3e2cf3772f'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-network-networksecurityperimeters'
 
 param policydisplayName = 'Enable logging by category group for microsoft.network/networksecurityperimeters to Log Analytics'
 

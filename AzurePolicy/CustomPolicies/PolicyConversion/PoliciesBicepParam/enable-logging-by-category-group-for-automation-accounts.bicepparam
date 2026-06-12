@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'b797045a-b3cd-46e4-adc4-bbadb3381d78'
+param policyDefinitionName = 'enable-logging-by-category-group-for-automation-accounts'
 
 param policydisplayName = 'Enable logging by category group for Automation Accounts (microsoft.automation/automationaccounts) to Log Analytics'
 

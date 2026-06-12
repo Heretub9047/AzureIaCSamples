@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '93a604fe-0ec2-4a99-ab8c-7ef08f05555a'
+param policyDefinitionName = 'enable-logging-by-category-group-for-signalr'
 
 param policydisplayName = 'Enable logging by category group for SignalR (microsoft.signalrservice/signalr) to Log Analytics'
 

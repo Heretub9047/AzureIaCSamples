@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '81039988-1f84-4aa6-8039-0a64c2a301b4'
+param policyDefinitionName = 'enable-logging-by-category-group-for-playwright-testing'
 
 param policydisplayName = 'Enable logging by category group for Playwright Testing (microsoft.azureplaywrightservice/accounts) to Log Analytics'
 

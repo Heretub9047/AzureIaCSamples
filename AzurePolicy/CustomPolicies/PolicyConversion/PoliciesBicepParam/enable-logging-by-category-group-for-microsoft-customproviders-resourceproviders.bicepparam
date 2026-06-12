@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '65a1573e-cc90-412b-8db2-ba60731b0ea6'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-customproviders-resourceproviders'
 
 param policydisplayName = 'Enable logging by category group for microsoft.customproviders/resourceproviders to Log Analytics'
 

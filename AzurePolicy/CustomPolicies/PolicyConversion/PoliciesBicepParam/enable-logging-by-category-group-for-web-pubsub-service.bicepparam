@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '0da6faeb-d6c6-4f6e-9f49-06277493270b'
+param policyDefinitionName = 'enable-logging-by-category-group-for-web-pubsub-service'
 
 param policydisplayName = 'Enable logging by category group for Web PubSub Service (microsoft.signalrservice/webpubsub) to Log Analytics'
 

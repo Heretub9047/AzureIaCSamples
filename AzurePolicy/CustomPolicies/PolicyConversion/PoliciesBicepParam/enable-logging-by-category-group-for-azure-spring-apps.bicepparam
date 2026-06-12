@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '0b6b8abb-7761-4e02-ae0e-2c873b5152ca'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-spring-apps'
 
 param policydisplayName = 'Enable logging by category group for Azure Spring Apps (microsoft.appplatform/spring) to Log Analytics'
 

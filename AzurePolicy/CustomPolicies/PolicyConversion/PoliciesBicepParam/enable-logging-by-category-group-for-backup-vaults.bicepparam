@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'fea83f6c-a18a-4338-8f1f-80ecba4c5643'
+param policyDefinitionName = 'enable-logging-by-category-group-for-backup-vaults'
 
 param policydisplayName = 'Enable logging by category group for Backup vaults (microsoft.dataprotection/backupvaults) to Log Analytics'
 

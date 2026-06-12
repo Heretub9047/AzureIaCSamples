@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '567c93f7-3661-494f-a30f-0a94d9bfebf8'
+param policyDefinitionName = 'enable-logging-by-category-group-for-api-management-services'
 
 param policydisplayName = 'Enable logging by category group for API Management services (microsoft.apimanagement/service) to Log Analytics'
 

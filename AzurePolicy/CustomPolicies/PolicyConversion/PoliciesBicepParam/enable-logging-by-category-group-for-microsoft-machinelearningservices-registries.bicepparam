@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = '33835ef6-bc67-4bde-bf5f-5a857f195a57'
+param policyDefinitionName = 'enable-logging-by-category-group-for-microsoft-machinelearningservices-registries'
 
 param policydisplayName = 'Enable logging by category group for microsoft.machinelearningservices/registries to Log Analytics'
 

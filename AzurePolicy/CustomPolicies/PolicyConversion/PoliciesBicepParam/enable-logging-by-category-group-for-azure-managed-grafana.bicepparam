@@ -1,6 +1,6 @@
 using '../main.bicep'
 
-param policyDefinitionName = 'd98f63ed-e319-4dc3-898f-600953a05f7e'
+param policyDefinitionName = 'enable-logging-by-category-group-for-azure-managed-grafana'
 
 param policydisplayName = 'Enable logging by category group for Azure Managed Grafana (microsoft.dashboard/grafana) to Log Analytics'
 
