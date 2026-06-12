@@ -2,7 +2,7 @@ using '../main.bicep'
 
 param policyDefinitionName = 'enable-logging-by-category-group-for-container-instances'
 
-param policydisplayName = 'Enable logging by category group for Container instances (microsoft.containerinstance/containergroups) to Log Analytics'
+param policydisplayName = 'Enable logging by category group for Container instances (microsoft.containerinstance/containergroups) by tags to Log Analytics'
 
 param description = 'Resource logs should be enabled to track activities and events that take place on your resources and give you visibility and insights into any changes that occur. This policy deploys a diagnostic setting using a category group to route logs to a Log Analytics workspace for Container instances (microsoft.containerinstance/containergroups).'
 

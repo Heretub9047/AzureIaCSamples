@@ -2,7 +2,7 @@ using '../main.bicep'
 
 param policyDefinitionName = 'enable-logging-by-category-group-for-expressroute-circuits'
 
-param policydisplayName = 'Enable logging by category group for ExpressRoute circuits (microsoft.network/expressroutecircuits) to Log Analytics'
+param policydisplayName = 'Enable logging by category group for ExpressRoute circuits (microsoft.network/expressroutecircuits) by tags to Log Analytics'
 
 param description = 'Resource logs should be enabled to track activities and events that take place on your resources and give you visibility and insights into any changes that occur. This policy deploys a diagnostic setting using a category group to route logs to a Log Analytics workspace for ExpressRoute circuits (microsoft.network/expressroutecircuits).'
 

@@ -2,7 +2,7 @@ using '../main.bicep'
 
 param policyDefinitionName = 'enable-logging-by-category-group-for-azure-managed-grafana'
 
-param policydisplayName = 'Enable logging by category group for Azure Managed Grafana (microsoft.dashboard/grafana) to Log Analytics'
+param policydisplayName = 'Enable logging by category group for Azure Managed Grafana (microsoft.dashboard/grafana) by tags to Log Analytics'
 
 param description = 'Resource logs should be enabled to track activities and events that take place on your resources and give you visibility and insights into any changes that occur. This policy deploys a diagnostic setting using a category group to route logs to a Log Analytics workspace for Azure Managed Grafana (microsoft.dashboard/grafana).'
 
