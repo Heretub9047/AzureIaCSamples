@@ -4,9 +4,9 @@
     using the Dataverse OData Web API.
 
 .DESCRIPTION
-    Authenticates against Microsoft Entra ID (Azure AD) using the OAuth2 client credentials
-    flow with an app registration (service principal), then queries the `organizations`
-    entity in Dataverse for the IP firewall related columns:
+    Authenticates against Microsoft Entra ID (Azure AD) using your interactively
+    signed-in Az PowerShell session (Connect-AzAccount), then queries the
+    `organizations` entity in Dataverse for the IP firewall related columns:
 
         - enableipbasedfirewallrule
         - allowediprangeforfirewall
@@ -24,26 +24,17 @@
 .PARAMETER TenantId
     Your Entra ID (Azure AD) tenant ID (GUID or verified domain, e.g. contoso.onmicrosoft.com)
 
-.PARAMETER ClientId
-    The Application (client) ID of an app registration that has API permission to
-    Dynamics CRM / Dataverse (user_impersonation, or is set up for app-only auth) and
-    has been added to the target environment as an application user with a security
-    role that can read the organizations table (e.g. System Administrator).
-
-.PARAMETER ClientSecret
-    The client secret for the app registration. Passed as a SecureString.
-
 .EXAMPLE
-    $secret = Read-Host -AsSecureString "Enter client secret"
+    Install-Module Az.Accounts -Scope CurrentUser
+    Connect-AzAccount
     .\Get-DataverseIPFirewallConfig.ps1 `
         -EnvironmentUrl "https://yourorg.crm.dynamics.com" `
-        -TenantId "00000000-0000-0000-0000-000000000000" `
-        -ClientId "11111111-1111-1111-1111-111111111111" `
-        -ClientSecret $secret
+        -TenantId "00000000-0000-0000-0000-000000000000"
 
 .NOTES
-    Requires PowerShell 5.1+ or PowerShell 7+. No external modules required
-    (uses Invoke-RestMethod directly against the token endpoint and the Web API).
+    Requires the Az.Accounts module (Install-Module Az.Accounts -Scope CurrentUser)
+    and an active interactive session via Connect-AzAccount. The signed-in user must
+    have access to the target Dataverse environment (e.g. System Administrator role).
 #>
 
 [CmdletBinding()]
@@ -52,13 +43,7 @@ param(
     [string]$EnvironmentUrl,
 
     [Parameter(Mandatory = $true)]
-    [string]$TenantId,
-
-    [Parameter(Mandatory = $true)]
-    [string]$ClientId,
-
-    [Parameter(Mandatory = $true)]
-    [System.Security.SecureString]$ClientSecret
+    [string]$TenantId
 )
 
 # ---------------------------------------------------------------------------
@@ -70,37 +55,33 @@ $resourceUrl    = $EnvironmentUrl
 Write-Verbose "Environment URL: $EnvironmentUrl"
 
 # ---------------------------------------------------------------------------
-# 2. Acquire an OAuth2 access token via client credentials flow
+# 2. Acquire an OAuth2 access token via the signed-in Az context (interactive)
 # ---------------------------------------------------------------------------
-$plainSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)
-)
-
-$tokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-
-$tokenBody = @{
-    client_id     = $ClientId
-    client_secret = $plainSecret
-    scope         = "$resourceUrl/.default"
-    grant_type    = "client_credentials"
-}
+# Requires: Install-Module Az.Accounts -Scope CurrentUser
+# and an interactive sign-in: Connect-AzAccount
 
 try {
-    Write-Verbose "Requesting access token from $tokenEndpoint"
-    $tokenResponse = Invoke-RestMethod -Method Post -Uri $tokenEndpoint -Body $tokenBody -ContentType "application/x-www-form-urlencoded"
-    $accessToken = $tokenResponse.access_token
+    Write-Verbose "Requesting access token for $resourceUrl via Get-AzAccessToken"
+    $tokenObj = Get-AzAccessToken -ResourceUrl $resourceUrl -TenantId $TenantId
+
+    if ($tokenObj.Token -is [System.Security.SecureString]) {
+        # Newer Az.Accounts versions return a SecureString
+        $accessToken = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($tokenObj.Token)
+        )
+    }
+    else {
+        # Older Az.Accounts versions return a plain string
+        $accessToken = $tokenObj.Token
+    }
 }
 catch {
-    Write-Error "Failed to acquire access token. $_"
+    Write-Error "Failed to acquire access token via Get-AzAccessToken. Make sure you've run Connect-AzAccount first. $_"
     return
-}
-finally {
-    # Clear the plaintext secret from memory as soon as we're done with it
-    $plainSecret = $null
 }
 
 if (-not $accessToken) {
-    Write-Error "No access token was returned. Check your TenantId, ClientId and ClientSecret."
+    Write-Error "No access token was returned. Check your TenantId and that you're signed in with Connect-AzAccount."
     return
 }
 
