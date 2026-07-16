@@ -1,31 +1,24 @@
 <#
 .SYNOPSIS
-    Reads (via workaround) and manages the IP allow list for a Power Pages website,
+    Reads (via workaround) the current IP allow list for a Power Pages website,
     using the documented Power Platform API (powerpages namespace).
 
 .DESCRIPTION
     The Power Platform API for Power Pages currently only publishes a POST endpoint
     ("Add Allowed IP Addresses") for this feature — there is no documented GET/List
     endpoint. However, the POST response always echoes back the FULL resulting
-    IpAddressEntity[] list, not just the newly added entries. This script uses that
-    behavior as a read mechanism:
+    IpAddressEntity[] list, not just any newly added entries.
 
-      - "Get" mode: submits an empty IpAddresses array (adds nothing) so the response
-        reflects the current state, then saves it to a local JSON snapshot file.
-      - "Add" mode: submits the IP address(es) you specify, and updates the same
-        local snapshot file with the new full state returned by the API.
+    This script uses that behavior as a read-only mechanism: it submits an EMPTY
+    IpAddresses array (adds nothing) so the response reflects the current state,
+    then saves that state to a local JSON snapshot file so you can track/diff it
+    over time, since the platform itself doesn't expose a public read endpoint.
 
-    Because there's no public GET, this script also keeps a local JSON file
-    (-StateFilePath) as your source of truth between runs, so you can diff changes
-    over time even though the platform itself doesn't expose read access.
+    This script does not add, remove, or modify anything on the website.
 
     Reference:
     https://learn.microsoft.com/en-us/rest/api/power-platform/powerpages/websites/add-allowed-ip-addresses
     https://learn.microsoft.com/en-us/power-pages/admin/admin-api
-
-.PARAMETER Action
-    "Get" to fetch/snapshot the current list (adds nothing).
-    "Add" to add one or more new IP addresses/ranges to the list.
 
 .PARAMETER EnvironmentId
     The Dataverse/Power Platform environment ID that hosts the Power Pages website.
@@ -38,35 +31,30 @@
     The website's subdomain, e.g. for https://contoso.powerappsportals.com this is
     "contoso". Used to resolve WebsiteId automatically if WebsiteId isn't supplied.
 
-.PARAMETER IpAddresses
-    One or more IP addresses/CIDR ranges to add. Only used when -Action Add.
-    IPv6 addresses are auto-detected; everything else is treated as IPv4.
-
 .PARAMETER StateFilePath
     Path to the local JSON snapshot file used to track the list between runs.
     Defaults to .\PowerPagesIPAllowList.json in the current directory.
 
 .EXAMPLE
     Connect-AzAccount
-    .\Manage-PowerPagesIPAllowList.ps1 -Action Get -EnvironmentId $envId -Subdomain "contoso"
+    .\Get-PowerPagesIPAllowList.ps1 -EnvironmentId $envId -Subdomain "contoso"
 
 .EXAMPLE
-    .\Manage-PowerPagesIPAllowList.ps1 -Action Add -EnvironmentId $envId -WebsiteId $siteId `
-        -IpAddresses "203.0.113.10/32","2001:db8::/32"
+    .\Get-PowerPagesIPAllowList.ps1 -EnvironmentId $envId -WebsiteId $siteId -Verbose
 
 .NOTES
     Requires Az.Accounts (Install-Module Az.Accounts -Scope CurrentUser) and an
     interactive sign-in via Connect-AzAccount. Per Microsoft's docs, the service
     principal (app-only) flow isn't currently available for Power Pages admin APIs —
     use an interactive/delegated user token.
+
+    Because the empty-array submission relies on documented request/response shape
+    rather than a documented GET, treat the result as best-effort. If the API
+    rejects an empty array, the error from the catch block will make that clear.
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'BySubdomain')]
 param(
-    [Parameter(Mandatory = $true)]
-    [ValidateSet('Get', 'Add')]
-    [string]$Action,
-
     [Parameter(Mandatory = $true)]
     [string]$EnvironmentId,
 
@@ -77,19 +65,11 @@ param(
     [string]$Subdomain,
 
     [Parameter()]
-    [string[]]$IpAddresses,
-
-    [Parameter()]
     [string]$StateFilePath = ".\PowerPagesIPAllowList.json",
 
     [Parameter()]
     [string]$ApiVersion = "2024-10-01"
 )
-
-if ($Action -eq 'Add' -and (-not $IpAddresses -or $IpAddresses.Count -eq 0)) {
-    Write-Error "-IpAddresses is required when -Action Add."
-    return
-}
 
 # ---------------------------------------------------------------------------
 # 1. Acquire an access token for the Power Platform API
@@ -143,30 +123,10 @@ if (-not $WebsiteId) {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Build the request body
+# 3. Call the API with an empty IpAddresses array (adds nothing, read-only intent)
 # ---------------------------------------------------------------------------
-function New-IpAddressEntry {
-    param([string]$Address)
+$body = @{ IpAddresses = @() } | ConvertTo-Json -Depth 5
 
-    $isIPv6 = $Address -match ':'
-    [PSCustomObject]@{
-        IpAddress     = $Address
-        IpAddressType = if ($isIPv6) { "IPv6" } else { "IPv4" }
-    }
-}
-
-$entriesToSubmit = @()
-if ($Action -eq 'Add') {
-    $entriesToSubmit = @($IpAddresses | ForEach-Object { New-IpAddressEntry -Address $_ })
-}
-# For -Action Get, we submit an empty array so nothing is added, but the API
-# still returns the full current list in its response.
-
-$body = @{ IpAddresses = $entriesToSubmit } | ConvertTo-Json -Depth 5
-
-# ---------------------------------------------------------------------------
-# 4. Call the API
-# ---------------------------------------------------------------------------
 $uri = "https://api.powerplatform.com/powerpages/environments/$EnvironmentId/websites/$WebsiteId/ipaddressrules?api-version=$ApiVersion"
 
 try {
@@ -179,7 +139,7 @@ catch {
 }
 
 # ---------------------------------------------------------------------------
-# 5. Persist the resulting full state locally
+# 4. Persist the resulting state locally
 # ---------------------------------------------------------------------------
 $snapshot = [PSCustomObject]@{
     EnvironmentId = $EnvironmentId
@@ -198,7 +158,7 @@ catch {
 }
 
 # ---------------------------------------------------------------------------
-# 6. Output
+# 5. Output
 # ---------------------------------------------------------------------------
 Write-Host "Current IP allow list for website $WebsiteId (environment $EnvironmentId):" -ForegroundColor Cyan
 $response | Format-Table IpAddress, IpType, CreatedOn -AutoSize
