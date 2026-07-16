@@ -1,166 +1,118 @@
 <#
 .SYNOPSIS
-    Reads (via workaround) the current IP allow list for a Power Pages website,
-    using the documented Power Platform API (powerpages namespace).
+    Tests service principal (client credentials) authentication against the
+    Power Platform API and confirms whether the token is authorized to call it.
 
 .DESCRIPTION
-    The Power Platform API for Power Pages currently only publishes a POST endpoint
-    ("Add Allowed IP Addresses") for this feature — there is no documented GET/List
-    endpoint. However, the POST response always echoes back the FULL resulting
-    IpAddressEntity[] list, not just any newly added entries.
+    Acquires a token via the OAuth2 client credentials flow (app-only, no user
+    context) and calls a low-risk, well-documented endpoint (List Environments)
+    to confirm the service principal is correctly consented and registered as
+    a Power Platform management application.
 
-    This script uses that behavior as a read-only mechanism: it submits an EMPTY
-    IpAddresses array (adds nothing) so the response reflects the current state,
-    then saves that state to a local JSON snapshot file so you can track/diff it
-    over time, since the platform itself doesn't expose a public read endpoint.
+    Note: Per Microsoft's Power Pages admin API documentation, the service
+    principal flow isn't currently available for the `powerpages` namespace
+    specifically (Add/list IP address rules, etc.) — even if this script
+    succeeds, the ipaddressrules endpoint from the earlier script may still
+    require a delegated (user) token. This script is here to isolate that.
 
-    This script does not add, remove, or modify anything on the website.
+.PARAMETER TenantId
+    Your Entra ID tenant ID.
 
-    Reference:
-    https://learn.microsoft.com/en-us/rest/api/power-platform/powerpages/websites/add-allowed-ip-addresses
-    https://learn.microsoft.com/en-us/power-pages/admin/admin-api
+.PARAMETER ClientId
+    The Application (client) ID of your app registration.
 
-.PARAMETER EnvironmentId
-    The Dataverse/Power Platform environment ID that hosts the Power Pages website.
-
-.PARAMETER WebsiteId
-    The Power Pages website's unique ID (GUID). If you don't know it, omit this and
-    supply -Subdomain instead; the script will look it up via Get Websites.
-
-.PARAMETER Subdomain
-    The website's subdomain, e.g. for https://contoso.powerappsportals.com this is
-    "contoso". Used to resolve WebsiteId automatically if WebsiteId isn't supplied.
-
-.PARAMETER StateFilePath
-    Path to the local JSON snapshot file used to track the list between runs.
-    Defaults to .\PowerPagesIPAllowList.json in the current directory.
+.PARAMETER ClientSecret
+    The client secret for the app registration, as a SecureString.
 
 .EXAMPLE
-    Connect-AzAccount
-    .\Get-PowerPagesIPAllowList.ps1 -EnvironmentId $envId -Subdomain "contoso"
-
-.EXAMPLE
-    .\Get-PowerPagesIPAllowList.ps1 -EnvironmentId $envId -WebsiteId $siteId -Verbose
+    $secret = Read-Host -AsSecureString "Enter client secret"
+    .\Test-PowerPlatformApiServicePrincipal.ps1 -TenantId $tenantId -ClientId $clientId -ClientSecret $secret
 
 .NOTES
-    Requires Az.Accounts (Install-Module Az.Accounts -Scope CurrentUser) and an
-    interactive sign-in via Connect-AzAccount. Per Microsoft's docs, the service
-    principal (app-only) flow isn't currently available for Power Pages admin APIs —
-    use an interactive/delegated user token.
-
-    Because the empty-array submission relies on documented request/response shape
-    rather than a documented GET, treat the result as best-effort. If the API
-    rejects an empty array, the error from the catch block will make that clear.
+    Prerequisites (one-time, done by a tenant admin):
+      1. App registration has an Application permission granted (with admin
+         consent) to the "Power Platform API" resource (appId 8578e004-a5c6-46e7-913e-12f58912df43).
+      2. The app is registered as a Power Platform management application:
+         New-PowerAppManagementApp -ApplicationId <your-client-id>
 #>
 
-[CmdletBinding(DefaultParameterSetName = 'BySubdomain')]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$EnvironmentId,
+    [string]$TenantId,
 
-    [Parameter(Mandatory = $true, ParameterSetName = 'ByWebsiteId')]
-    [string]$WebsiteId,
+    [Parameter(Mandatory = $true)]
+    [string]$ClientId,
 
-    [Parameter(Mandatory = $true, ParameterSetName = 'BySubdomain')]
-    [string]$Subdomain,
-
-    [Parameter()]
-    [string]$StateFilePath = ".\PowerPagesIPAllowList.json",
+    [Parameter(Mandatory = $true)]
+    [System.Security.SecureString]$ClientSecret,
 
     [Parameter()]
     [string]$ApiVersion = "2024-10-01"
 )
 
 # ---------------------------------------------------------------------------
-# 1. Acquire an access token for the Power Platform API
+# 1. Acquire a token via client credentials flow
 # ---------------------------------------------------------------------------
+$plainSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)
+)
+
+$tokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+
+$tokenBody = @{
+    client_id     = $ClientId
+    client_secret = $plainSecret
+    scope         = "https://api.powerplatform.com/.default"
+    grant_type    = "client_credentials"
+}
+
 try {
-    $tokenObj = Get-AzAccessToken -ResourceUrl "https://api.powerplatform.com"
-    $accessToken = if ($tokenObj.Token -is [System.Security.SecureString]) {
-        [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($tokenObj.Token)
-        )
-    }
-    else {
-        $tokenObj.Token
-    }
+    Write-Verbose "Requesting token from $tokenEndpoint"
+    $tokenResponse = Invoke-RestMethod -Method Post -Uri $tokenEndpoint -Body $tokenBody -ContentType "application/x-www-form-urlencoded"
+    $accessToken = $tokenResponse.access_token
 }
 catch {
-    Write-Error "Failed to acquire access token. Make sure you've run Connect-AzAccount first. $_"
+    Write-Error "Failed to acquire token. Check ClientId/ClientSecret/TenantId, and that the app has API permissions to 'Power Platform API'. $_"
+    return
+}
+finally {
+    $plainSecret = $null
+}
+
+if (-not $accessToken) {
+    Write-Error "No access token returned."
     return
 }
 
-$headers = @{
-    Authorization  = "Bearer $accessToken"
-    "Content-Type" = "application/json"
-}
+# ---------------------------------------------------------------------------
+# 2. Decode and display the token's claims for diagnostic purposes
+# ---------------------------------------------------------------------------
+$parts = $accessToken.Split('.')
+$payload = $parts[1].Replace('-', '+').Replace('_', '/')
+switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } }
+$claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+
+Write-Host "Token claims:" -ForegroundColor Cyan
+$claims | Select-Object aud, appid, tid, roles | Format-List
 
 # ---------------------------------------------------------------------------
-# 2. Resolve WebsiteId from Subdomain if needed
+# 3. Test call: List Environments (tenant-level, low risk, well documented)
 # ---------------------------------------------------------------------------
-if (-not $WebsiteId) {
-    $listUri = "https://api.powerplatform.com/powerpages/environments/$EnvironmentId/websites?api-version=$ApiVersion"
-    try {
-        $sites = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers
-    }
-    catch {
-        Write-Error "Failed to list websites for environment '$EnvironmentId'. $_"
-        return
-    }
-
-    $match = $sites | Where-Object { $_.subdomain -eq $Subdomain }
-    if (-not $match) {
-        Write-Error "No website found with subdomain '$Subdomain' in environment '$EnvironmentId'."
-        return
-    }
-    if (@($match).Count -gt 1) {
-        Write-Warning "Multiple websites matched subdomain '$Subdomain'. Using the first result."
-        $match = @($match)[0]
-    }
-
-    $WebsiteId = $match.id
-    Write-Verbose "Resolved WebsiteId: $WebsiteId"
-}
-
-# ---------------------------------------------------------------------------
-# 3. Call the API with an empty IpAddresses array (adds nothing, read-only intent)
-# ---------------------------------------------------------------------------
-$body = @{ IpAddresses = @() } | ConvertTo-Json -Depth 5
-
-$uri = "https://api.powerplatform.com/powerpages/environments/$EnvironmentId/websites/$WebsiteId/ipaddressrules?api-version=$ApiVersion"
+$headers = @{ Authorization = "Bearer $accessToken" }
+$uri = "https://api.powerplatform.com/environmentmanagement/environments?api-version=$ApiVersion"
 
 try {
     Write-Verbose "Calling $uri"
-    $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body
+    $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+    Write-Host "`nSUCCESS - service principal is authorized against api.powerplatform.com" -ForegroundColor Green
+    $response.value | Select-Object -First 5 name, properties | Format-Table -AutoSize
 }
 catch {
-    Write-Error "Failed to call ipaddressrules endpoint. $_"
+    Write-Host "`nFAILED calling api.powerplatform.com" -ForegroundColor Red
+    Write-Error $_
+    Write-Host "`nIf this is a 403, confirm:" -ForegroundColor Yellow
+    Write-Host "  1. Admin consent was granted for the app's Power Platform API permission" -ForegroundColor Yellow
+    Write-Host "  2. New-PowerAppManagementApp -ApplicationId $ClientId has been run by a tenant admin" -ForegroundColor Yellow
     return
 }
-
-# ---------------------------------------------------------------------------
-# 4. Persist the resulting state locally
-# ---------------------------------------------------------------------------
-$snapshot = [PSCustomObject]@{
-    EnvironmentId = $EnvironmentId
-    WebsiteId     = $WebsiteId
-    Subdomain     = $Subdomain
-    RetrievedOn   = (Get-Date).ToUniversalTime().ToString("o")
-    IpAddresses   = $response
-}
-
-try {
-    $snapshot | ConvertTo-Json -Depth 6 | Set-Content -Path $StateFilePath -Encoding UTF8
-    Write-Verbose "Saved snapshot to $StateFilePath"
-}
-catch {
-    Write-Warning "Fetched the list successfully, but failed to write the local snapshot file. $_"
-}
-
-# ---------------------------------------------------------------------------
-# 5. Output
-# ---------------------------------------------------------------------------
-Write-Host "Current IP allow list for website $WebsiteId (environment $EnvironmentId):" -ForegroundColor Cyan
-$response | Format-Table IpAddress, IpType, CreatedOn -AutoSize
-
-return $response
