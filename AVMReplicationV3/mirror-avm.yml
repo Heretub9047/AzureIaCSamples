@@ -1,0 +1,144 @@
+# =============================================================================
+# AVM Mirror Pipeline
+#
+# Nightly job that keeps bicep/avm/** in this repo in sync with the source of
+# every currently-published Azure Verified Module. Rather than committing
+# straight to main, new versions are pushed to a dedicated long-lived branch
+# (branchName) and opened as a pull request into targetBranch -- a human (or
+# a policy-driven auto-complete, if you choose to configure one) merges it.
+#
+# Prerequisites:
+#   1. The identity this pipeline runs as (by default, the project's Build
+#      Service account) needs "Contribute" AND "Contribute to pull requests"
+#      permission on this repo, so it can push the mirror branch and open
+#      PRs against it.
+#   2. This pipeline's job needs access to the OAuth token (System.AccessToken)
+#      to call the Azure DevOps REST API and open the PR -- wired up via the
+#      env block on the sync step below. No extra service connection needed
+#      for this.
+#   3. No Azure login is needed for this pipeline (it only reads public
+#      GitHub/MCR endpoints and talks to this Azure Repo). The publish
+#      pipeline (publish-modules.yml) is what pushes into Azure/ACR.
+# =============================================================================
+
+trigger: none
+
+schedules:
+  - cron: "0 2 * * *" # 02:00 UTC nightly
+    displayName: Nightly AVM mirror sync
+    branches:
+      include:
+        - main
+    always: true
+
+parameters:
+  - name: targetBranch
+    displayName: Branch in this repo the PR should target
+    type: string
+    default: "main"
+
+  - name: branchName
+    displayName: Long-lived branch this pipeline pushes mirror commits to
+    type: string
+    default: "avm-mirror-sync"
+
+  - name: includeOrphaned
+    displayName: Include AVM modules marked "Orphaned" (still published, unmaintained)
+    type: boolean
+    default: true
+
+  - name: discoverParallelism
+    displayName: Parallel MCR tag-listing requests
+    type: number
+    default: 8
+
+  - name: syncParallelism
+    displayName: Parallel GitHub source-file downloads
+    type: number
+    default: 12
+
+  - name: commitUserName
+    displayName: Git author name for mirror commits
+    type: string
+    default: "AVM Mirror Bot"
+
+  - name: commitUserEmail
+    displayName: Git author email for mirror commits
+    type: string
+    default: "avm-mirror-bot@localhost"
+
+variables:
+  - name: AVM_INCLUDE_ORPHANED
+    value: ${{ parameters.includeOrphaned }}
+
+pool:
+  vmImage: "ubuntu-latest"
+
+steps:
+  - checkout: self
+    persistCredentials: true # required so `git push` later in this job is authenticated
+    clean: true
+
+  - task: PowerShell@2
+    displayName: "Discover published AVM module paths"
+    inputs:
+      targetType: filePath
+      filePath: scripts/discover-modules.ps1
+      arguments: '-OutputPath "$(Agent.TempDirectory)/modules.txt"'
+      pwsh: true
+    env:
+      AVM_INCLUDE_ORPHANED: $(AVM_INCLUDE_ORPHANED)
+
+  - task: PowerShell@2
+    displayName: "Install ORAS (read-only MCR tag listing)"
+    inputs:
+      targetType: filePath
+      filePath: scripts/install-oras.ps1
+      pwsh: true
+
+  - task: PowerShell@2
+    displayName: "Add ORAS to PATH"
+    inputs:
+      targetType: inline
+      pwsh: true
+      script: 'Write-Host "##vso[task.prependpath]$(orasInstallDir)"'
+
+  - task: PowerShell@2
+    displayName: "Resolve latest version per module from MCR"
+    inputs:
+      targetType: filePath
+      filePath: scripts/get-latest-versions.ps1
+      arguments: >-
+        -ModulesFile "$(Agent.TempDirectory)/modules.txt"
+        -OutputFile "$(Agent.TempDirectory)/modules-latest.csv"
+        -Parallelism ${{ parameters.discoverParallelism }}
+      pwsh: true
+
+  - task: PowerShell@2
+    name: checkNewVersions
+    displayName: "Check for new AVM versions"
+    inputs:
+      targetType: filePath
+      filePath: scripts/check-for-new-versions.ps1
+      arguments: >-
+        -ModulesLatestFile "$(Agent.TempDirectory)/modules-latest.csv"
+        -RepoRoot "$(Build.SourcesDirectory)"
+      pwsh: true
+
+  - task: PowerShell@2
+    displayName: "Sync AVM source into bicep/avm/** and open/update PR"
+    condition: eq(variables['checkNewVersions.hasNewVersions'], 'true')
+    inputs:
+      targetType: filePath
+      filePath: scripts/sync-avm-source.ps1
+      arguments: >-
+        -ModulesLatestFile "$(Agent.TempDirectory)/modules-latest.csv"
+        -RepoRoot "$(Build.SourcesDirectory)"
+        -TargetBranch "${{ parameters.targetBranch }}"
+        -BranchName "${{ parameters.branchName }}"
+        -Parallelism ${{ parameters.syncParallelism }}
+        -CommitUserName "${{ parameters.commitUserName }}"
+        -CommitUserEmail "${{ parameters.commitUserEmail }}"
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken) # not exposed to scripts unless explicitly mapped like this
