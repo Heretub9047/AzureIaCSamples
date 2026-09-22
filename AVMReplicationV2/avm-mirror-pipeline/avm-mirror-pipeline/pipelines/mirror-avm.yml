@@ -1,0 +1,118 @@
+# =============================================================================
+# AVM Mirror Pipeline
+#
+# Nightly job that keeps bicep/avm/** in this repo in sync with the source of
+# every currently-published Azure Verified Module. Commits go straight to
+# the target branch (main by default) -- no PR step.
+#
+# Prerequisites:
+#   1. The identity this pipeline runs as (by default, the project's Build
+#      Service account) needs "Contribute" permission on this repo, and, if
+#      main has branch policies, "Bypass policies when pushing" -- since
+#      this pipeline pushes directly with no PR.
+#   2. No Azure login is needed for this pipeline (it only reads public
+#      GitHub/MCR endpoints and pushes to this Azure Repo). The publish
+#      pipeline (publish-modules.yml) is what pushes into Azure.
+# =============================================================================
+
+trigger: none
+
+schedules:
+  - cron: "0 2 * * *" # 02:00 UTC nightly
+    displayName: Nightly AVM mirror sync
+    branches:
+      include:
+        - main
+    always: true
+
+parameters:
+  - name: targetBranch
+    displayName: Branch in this repo to commit/push to
+    type: string
+    default: "main"
+
+  - name: includeOrphaned
+    displayName: Include AVM modules marked "Orphaned" (still published, unmaintained)
+    type: boolean
+    default: true
+
+  - name: discoverParallelism
+    displayName: Parallel MCR tag-listing requests
+    type: number
+    default: 8
+
+  - name: syncParallelism
+    displayName: Parallel GitHub source-file downloads
+    type: number
+    default: 12
+
+  - name: commitUserName
+    displayName: Git author name for mirror commits
+    type: string
+    default: "AVM Mirror Bot"
+
+  - name: commitUserEmail
+    displayName: Git author email for mirror commits
+    type: string
+    default: "avm-mirror-bot@localhost"
+
+variables:
+  - name: AVM_INCLUDE_ORPHANED
+    value: ${{ parameters.includeOrphaned }}
+
+pool:
+  vmImage: "ubuntu-latest"
+
+steps:
+  - checkout: self
+    persistCredentials: true # required so `git push` later in this job is authenticated
+    clean: true
+
+  - task: PowerShell@2
+    displayName: "Discover published AVM module paths"
+    inputs:
+      targetType: filePath
+      filePath: scripts/discover-modules.ps1
+      arguments: '-OutputPath "$(Agent.TempDirectory)/modules.txt"'
+      pwsh: true
+    env:
+      AVM_INCLUDE_ORPHANED: $(AVM_INCLUDE_ORPHANED)
+
+  - task: PowerShell@2
+    displayName: "Install ORAS (read-only MCR tag listing)"
+    inputs:
+      targetType: filePath
+      filePath: scripts/install-oras.ps1
+      pwsh: true
+
+  - task: PowerShell@2
+    displayName: "Add ORAS to PATH"
+    inputs:
+      targetType: inline
+      pwsh: true
+      script: 'Write-Host "##vso[task.prependpath]$(orasInstallDir)"'
+
+  - task: PowerShell@2
+    displayName: "Resolve latest version per module from MCR"
+    inputs:
+      targetType: filePath
+      filePath: scripts/get-latest-versions.ps1
+      arguments: >-
+        -ModulesFile "$(Agent.TempDirectory)/modules.txt"
+        -OutputFile "$(Agent.TempDirectory)/modules-latest.csv"
+        -Parallelism ${{ parameters.discoverParallelism }}
+      pwsh: true
+
+  - task: PowerShell@2
+    displayName: "Sync AVM source into bicep/avm/** and push"
+    inputs:
+      targetType: filePath
+      filePath: scripts/sync-avm-source.ps1
+      arguments: >-
+        -ModulesLatestFile "$(Agent.TempDirectory)/modules-latest.csv"
+        -RepoRoot "$(Build.SourcesDirectory)"
+        -TargetBranch "${{ parameters.targetBranch }}"
+        -Parallelism ${{ parameters.syncParallelism }}
+        -CommitUserName "${{ parameters.commitUserName }}"
+        -CommitUserEmail "${{ parameters.commitUserEmail }}"
+      pwsh: true

@@ -1,0 +1,78 @@
+# =============================================================================
+# Bicep Module Publish Pipeline
+#
+# Triggered whenever bicep/** changes on main -- picks up:
+#   - new/updated AVM modules landed by mirror-avm.yml
+#   - new/updated custom modules merged via normal PR under bicep/custom/**
+#
+# Scans every module folder and diffs against what's already published in
+# the ACR, so it's safe to also run this on a schedule as a safety net (a
+# missed trigger, a manual bulk edit, etc. all self-heal on the next run).
+#
+# Prerequisites:
+#   1. An Azure Resource Manager service connection ("AzureServiceConnection"
+#      by default) whose identity has AcrPush (or higher, e.g. Contributor)
+#      on the destination ACR. Note this is a *data-plane* push
+#      (`az bicep publish`), unlike an `az acr import`-based pipeline which
+#      would need the importImage control-plane action instead.
+#   2. An existing Azure Container Registry to publish into.
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - bicep/*
+
+schedules:
+  - cron: "0 3 * * *" # 03:00 UTC nightly safety-net run (after the 02:00 mirror sync)
+    displayName: Nightly publish safety net
+    branches:
+      include:
+        - main
+    always: true
+
+parameters:
+  - name: azureServiceConnection
+    displayName: Azure service connection name
+    type: string
+    default: "AzureServiceConnection"
+
+  - name: acrName
+    displayName: Destination ACR name (without .azurecr.io)
+    type: string
+    default: "myorgacr"
+
+  - name: dryRun
+    displayName: Dry run (diff only, don't actually publish)
+    type: boolean
+    default: false
+
+variables:
+  - name: dryRunFlag
+    ${{ if eq(parameters.dryRun, true) }}:
+      value: "-DryRun"
+    ${{ else }}:
+      value: ""
+
+pool:
+  vmImage: "ubuntu-latest"
+
+steps:
+  - checkout: self
+    clean: true
+
+  - task: AzureCLI@2
+    displayName: "Diff & publish missing modules"
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: pscore
+      scriptLocation: scriptPath
+      scriptPath: scripts/publish-modules.ps1
+      arguments: >-
+        -RepoRoot "$(Build.SourcesDirectory)"
+        -AcrName "${{ parameters.acrName }}"
+        $(dryRunFlag)
+      failOnStandardError: false
