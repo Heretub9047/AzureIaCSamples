@@ -1,0 +1,168 @@
+# =============================================================================
+# AVM Mirror Pipeline
+#
+# Purpose:
+#   Keeps a private Azure Container Registry (ACR) in sync with the public
+#   Azure Verified Modules (AVM) Bicep registry hosted on mcr.microsoft.com.
+#
+#   Stage 1 (Discover): reads the official AVM module-index CSVs to get the
+#     full, current list of published module paths, then queries MCR for
+#     every published version (tag) of each module.
+#
+#   Stage 2 (Sync): diffs that list against what's already in your ACR and
+#     uses `az acr import` (server-side copy, no data through the agent) to
+#     pull across only what's missing.
+#
+# All logic lives in PowerShell (pwsh), which ships pre-installed on both
+# Windows and Linux Microsoft-hosted agents -- no extra tooling to install.
+#
+# Prerequisites:
+#   1. An Azure Resource Manager service connection ("AzureServiceConnection"
+#      by default) whose identity has a role on the destination ACR that
+#      includes the Microsoft.ContainerRegistry/registries/importImage/action
+#      permission (the built-in "Contributor" role covers this; "AcrPush"
+#      alone does NOT).
+#   2. An existing Azure Container Registry to mirror into.
+#   3. This repo (containing this file + /scripts) added as an Azure DevOps
+#      pipeline.
+# =============================================================================
+
+trigger: none # this pipeline is scheduled / manually triggered, not CI-triggered
+
+schedules:
+  - cron: "0 2 * * *" # every day at 02:00 UTC
+    displayName: Nightly AVM sync
+    branches:
+      include:
+        - main
+    always: true # run even if nothing changed in this repo since last run
+
+parameters:
+  - name: azureServiceConnection
+    displayName: Azure service connection name
+    type: string
+    default: "AzureServiceConnection"
+
+  - name: acrName
+    displayName: Destination ACR name (without .azurecr.io)
+    type: string
+    default: "myorgacr"
+
+  - name: destinationPrefix
+    displayName: Repository prefix in the destination ACR
+    type: string
+    default: "bicep" # keeps paths identical to MCR, e.g. bicep/avm/res/...
+
+  - name: includeOrphaned
+    displayName: Include AVM modules marked "Orphaned" (still published, unmaintained)
+    type: boolean
+    default: true
+
+  - name: dryRun
+    displayName: Dry run (discover + diff only, don't actually import)
+    type: boolean
+    default: false
+
+  - name: discoverParallelism
+    displayName: Parallel MCR tag-listing requests
+    type: number
+    default: 8
+
+  - name: syncParallelism
+    displayName: Parallel az acr import operations
+    type: number
+    default: 6
+
+variables:
+  - name: AVM_INCLUDE_ORPHANED
+    value: ${{ parameters.includeOrphaned }}
+
+pool:
+  vmImage: "ubuntu-latest"
+
+stages:
+  # ---------------------------------------------------------------------------
+  - stage: Discover
+    displayName: "Discover new AVM modules & versions"
+    jobs:
+      - job: Discover
+        displayName: "Query AVM index + MCR tags"
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: "Discover published AVM module paths"
+            inputs:
+              targetType: filePath
+              filePath: scripts/discover-modules.ps1
+              arguments: "-OutputPath `"$(Build.ArtifactStagingDirectory)/modules.txt`""
+              pwsh: true
+            env:
+              AVM_INCLUDE_ORPHANED: $(AVM_INCLUDE_ORPHANED)
+
+          - task: PowerShell@2
+            displayName: "Install ORAS (read-only MCR tag listing)"
+            inputs:
+              targetType: filePath
+              filePath: scripts/install-oras.ps1
+              pwsh: true
+
+          - bash: echo "##vso[task.prependpath]$(orasInstallDir)"
+            displayName: "Add ORAS to PATH"
+
+          - task: PowerShell@2
+            displayName: "List published tags per module from MCR"
+            inputs:
+              targetType: filePath
+              filePath: scripts/get-tags.ps1
+              arguments: >-
+                -ModulesFile "$(Build.ArtifactStagingDirectory)/modules.txt"
+                -OutputFile "$(Build.ArtifactStagingDirectory)/modules-tags.csv"
+                -Parallelism ${{ parameters.discoverParallelism }}
+              pwsh: true
+
+          - task: PowerShell@2
+            name: discoverySummary
+            displayName: "Summarize discovery"
+            inputs:
+              targetType: inline
+              pwsh: true
+              script: |
+                $moduleCount = (Get-Content "$(Build.ArtifactStagingDirectory)/modules.txt" | Measure-Object -Line).Lines
+                $tagCount = (Get-Content "$(Build.ArtifactStagingDirectory)/modules-tags.csv" | Measure-Object -Line).Lines
+                Write-Host "Discovered $moduleCount modules / $tagCount module+version combinations"
+                Write-Host "##vso[task.setvariable variable=discoveredCount;isOutput=true]$tagCount"
+
+          - publish: "$(Build.ArtifactStagingDirectory)/modules-tags.csv"
+            artifact: avm-index
+            displayName: "Publish module/version index"
+
+  # ---------------------------------------------------------------------------
+  - stage: Sync
+    displayName: "Sync into private ACR"
+    dependsOn: Discover
+    condition: succeeded()
+    jobs:
+      - job: Sync
+        displayName: "Import missing modules/versions via az acr import"
+        steps:
+          - checkout: self
+
+          - download: current
+            artifact: avm-index
+            displayName: "Download module/version index"
+
+          - task: AzureCLI@2
+            displayName: "Diff & import missing versions"
+            inputs:
+              azureSubscription: ${{ parameters.azureServiceConnection }}
+              scriptType: pscore
+              scriptLocation: scriptPath
+              scriptPath: scripts/sync-modules.ps1
+              arguments: "-ModulesTagsFile `"$(Pipeline.Workspace)/avm-index/modules-tags.csv`""
+              failOnStandardError: false
+            env:
+              ACR_NAME: ${{ parameters.acrName }}
+              DEST_PREFIX: ${{ parameters.destinationPrefix }}
+              PARALLELISM: ${{ parameters.syncParallelism }}
+              DRY_RUN: ${{ parameters.dryRun }}
