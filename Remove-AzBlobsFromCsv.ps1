@@ -29,12 +29,6 @@
 .PARAMETER ReportPath
     Where to write the report. Defaults to .\DeletionReport_<timestamp>.csv
 
-.PARAMETER SasToken
-    Use one SAS token for all accounts (needs Delete + List permissions).
-
-.PARAMETER AccountKeys
-    Hashtable of account name -> account key, e.g. @{ myaccount = '...key...' }
-
 .PARAMETER AllowContainerRoot
     Allow a Folder row that points at a container root (deletes everything in that container).
     Blocked by default.
@@ -50,17 +44,15 @@
     # Real run
     .\Remove-AzBlobsFromCsv.ps1 -CsvPath .\deletions.csv
 
-.EXAMPLE
-    # Using account keys
-    .\Remove-AzBlobsFromCsv.ps1 -CsvPath .\deletions.csv -AccountKeys @{ acct1 = 'key1'; acct2 = 'key2' }
-
 .NOTES
     Requires the Az.Storage module:  Install-Module Az.Storage -Scope CurrentUser
-    With Entra ID auth (default) your identity needs "Storage Blob Data Contributor" (or Owner)
-    on each account/container. If blob soft delete is enabled on an account, deleted blobs
+    Authentication is Entra ID (RBAC) only - SAS tokens and account keys are not supported.
+    Your signed-in identity needs "Storage Blob Data Contributor" (or "Storage Blob Data Owner")
+    on each storage account or container. Management-plane roles such as Owner/Contributor
+    alone are NOT sufficient. If blob soft delete is enabled on an account, deleted blobs
     remain recoverable for the retention period.
 #>
-[CmdletBinding(SupportsShouldProcess = $true, DefaultParameterSetName = 'EntraId')]
+[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path $_ -PathType Leaf })]
@@ -68,20 +60,13 @@ param(
 
     [string]$ReportPath = (Join-Path (Get-Location) ("DeletionReport_{0:yyyyMMdd_HHmmss}.csv" -f (Get-Date))),
 
-    [Parameter(ParameterSetName = 'Sas', Mandatory = $true)]
-    [string]$SasToken,
-
-    [Parameter(ParameterSetName = 'Key', Mandatory = $true)]
-    [hashtable]$AccountKeys,
-
     [switch]$AllowContainerRoot,
 
     [switch]$Force
 )
 
 Set-StrictMode -Version Latest
-$AuthMode = $PSCmdlet.ParameterSetName
-$DryRun   = [bool]$WhatIfPreference
+$DryRun = [bool]$WhatIfPreference
 
 #region ---------- Setup checks ----------
 if (-not (Get-Module -ListAvailable -Name Az.Storage)) {
@@ -89,9 +74,11 @@ if (-not (Get-Module -ListAvailable -Name Az.Storage)) {
 }
 Import-Module Az.Storage -ErrorAction Stop
 
-if ($AuthMode -eq 'EntraId' -and -not (Get-AzContext -ErrorAction SilentlyContinue)) {
+$azContext = Get-AzContext -ErrorAction SilentlyContinue
+if (-not $azContext) {
     Write-Host "Not signed in to Azure - launching Connect-AzAccount..." -ForegroundColor Yellow
     Connect-AzAccount -ErrorAction Stop | Out-Null
+    $azContext = Get-AzContext -ErrorAction Stop
 }
 #endregion
 
@@ -172,15 +159,8 @@ function Get-StorageCtx {
     param([string]$Account, [string]$Endpoint)
     $key = "$Account|$Endpoint"
     if (-not $Contexts.ContainsKey($key)) {
-        switch ($AuthMode) {
-            'Sas' { $ctx = New-AzStorageContext -StorageAccountName $Account -SasToken $SasToken -Endpoint $Endpoint }
-            'Key' {
-                if (-not $AccountKeys.ContainsKey($Account)) { throw "No key supplied in -AccountKeys for account '$Account'" }
-                $ctx = New-AzStorageContext -StorageAccountName $Account -StorageAccountKey $AccountKeys[$Account] -Endpoint $Endpoint
-            }
-            default { $ctx = New-AzStorageContext -StorageAccountName $Account -UseConnectedAccount -Endpoint $Endpoint }
-        }
-        $Contexts[$key] = $ctx
+        # Entra ID (RBAC) only - uses the identity from Connect-AzAccount
+        $Contexts[$key] = New-AzStorageContext -StorageAccountName $Account -UseConnectedAccount -Endpoint $Endpoint -ErrorAction Stop
     }
     return $Contexts[$key]
 }
@@ -218,7 +198,7 @@ Write-Host "Azure blob deletion" -ForegroundColor White
 Write-Host ("  Input      : {0}" -f (Resolve-Path $CsvPath))
 Write-Host ("  Rows       : {0}" -f $rows.Count)
 Write-Host ("  Accounts   : {0}" -f ($accounts -join ', '))
-Write-Host ("  Auth       : {0}" -f $AuthMode)
+Write-Host ("  Auth       : Entra ID (RBAC) as {0}" -f $azContext.Account.Id)
 Write-Host ("  Mode       : {0}" -f $(if ($DryRun) { 'DRY RUN (-WhatIf) - nothing will be deleted' } else { 'LIVE - blobs will be deleted' })) `
     -ForegroundColor $(if ($DryRun) { 'Cyan' } else { 'Red' })
 Write-Host ("  Report     : {0}" -f $ReportPath)
