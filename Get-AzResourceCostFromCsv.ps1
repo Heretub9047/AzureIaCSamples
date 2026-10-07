@@ -6,8 +6,10 @@
 
 .DESCRIPTION
     The CSV can contain resources from many subscriptions. The script:
-      1. Reads resource IDs from the CSV (column 'ResourceId', or 'Id' / 'ResourceID').
-      2. Groups them by subscription (parsed from the resource ID).
+      1. Reads the CSV (columns: name, type, resourceGroup, subscriptionId) and builds the
+         full resource ID for each row. For child resources use the full type and a
+         slash-separated name, e.g. type 'Microsoft.Sql/servers/databases', name 'srv/db'.
+      2. Groups them by subscription.
       3. Queries the Cost Management Query API once per subscription (in batches of IDs),
          for the supplied date range, grouped by resource.
       4. Writes a per-resource cost CSV (resources with no cost in the period are included
@@ -80,10 +82,23 @@ $ErrorActionPreference = 'Stop'
 if ($EndDate.Date -lt $StartDate.Date) { throw 'EndDate must be on or after StartDate.' }
 
 #region Helpers
-function Get-SubscriptionIdFromResourceId {
-    param([string]$Id)
-    if ($Id -match '^/subscriptions/([0-9a-fA-F-]{36})/') { return $Matches[1].ToLowerInvariant() }
-    return $null
+# Builds a full resource ID from the name / type / resourceGroup / subscriptionId columns.
+# Child resources: type 'Microsoft.Sql/servers/databases' with name 'myserver/mydb' ->
+# .../providers/Microsoft.Sql/servers/myserver/databases/mydb
+function New-ResourceId {
+    param($Row)
+    $sub  = "$($Row.subscriptionId)".Trim()
+    $rg   = "$($Row.resourceGroup)".Trim()
+    $type = "$($Row.type)".Trim().Trim('/')
+    $name = "$($Row.name)".Trim().Trim('/')
+    if ($sub -notmatch '^[0-9a-fA-F-]{36}$' -or -not $rg -or -not $name -or $type -notmatch '^[^/]+/.+') { return $null }
+
+    $typeParts = $type -split '/'
+    $nameParts = $name -split '/'
+    if ($nameParts.Count -ne $typeParts.Count - 1) { return $null }
+
+    $tail = for ($i = 0; $i -lt $nameParts.Count; $i++) { "$($typeParts[$i + 1])/$($nameParts[$i])" }
+    return "/subscriptions/$sub/resourceGroups/$rg/providers/$($typeParts[0])/" + ($tail -join '/')
 }
 
 # Splits a date range into chunks of at most 12 months (Query API limit is 1 year)
@@ -148,23 +163,31 @@ if (-not $OutputPath) {
 $rows = @(Import-Csv -Path $resolvedCsv)
 if ($rows.Count -eq 0) { throw "CSV '$resolvedCsv' contains no rows." }
 
-$idColumn = 'ResourceId', 'ResourceID', 'Id', 'ID' | Where-Object { $_ -in $rows[0].PSObject.Properties.Name } | Select-Object -First 1
-if (-not $idColumn) { throw "CSV must have a 'ResourceId' column (also accepted: ResourceID, Id)." }
+$required = 'name', 'type', 'resourceGroup', 'subscriptionId'
+$columns  = $rows[0].PSObject.Properties.Name
+$missing  = $required | Where-Object { $_ -notin $columns }
+if ($missing) { throw "CSV is missing required column(s): $($missing -join ', ')" }
 
-$resources = @($rows | ForEach-Object { "$($_.$idColumn)".Trim().TrimEnd('/') } |
-               Where-Object { $_ } | Sort-Object -Unique { $_.ToLowerInvariant() })
-
-$bySub = @{}
-$invalid = New-Object System.Collections.Generic.List[string]
-foreach ($id in $resources) {
-    $sub = Get-SubscriptionIdFromResourceId $id
-    if (-not $sub) { $invalid.Add($id); continue }
+$bySub = @{}       # subscriptionId -> list of resource IDs
+$info  = @{}       # lower-cased resource ID -> source row details
+$invalid = 0
+foreach ($row in $rows) {
+    $id = New-ResourceId -Row $row
+    if (-not $id) {
+        $invalid++
+        Write-Warning "Skipping row with missing/invalid values: name='$($row.name)' type='$($row.type)' resourceGroup='$($row.resourceGroup)' subscriptionId='$($row.subscriptionId)'"
+        continue
+    }
+    $lid = $id.ToLowerInvariant()
+    if ($info.ContainsKey($lid)) { continue }   # de-duplicate
+    $sub = "$($row.subscriptionId)".Trim().ToLowerInvariant()
+    $info[$lid] = [pscustomobject]@{ Id = $id; Sub = $sub; Name = "$($row.name)".Trim(); Type = "$($row.type)".Trim(); ResourceGroup = "$($row.resourceGroup)".Trim() }
     if (-not $bySub.ContainsKey($sub)) { $bySub[$sub] = New-Object System.Collections.Generic.List[string] }
     $bySub[$sub].Add($id)
 }
-foreach ($bad in $invalid) { Write-Warning "Skipping invalid resource ID: $bad" }
+if ($info.Count -eq 0) { throw 'No valid resources found in the CSV.' }
 
-Write-Host ("Loaded {0} unique resource(s) across {1} subscription(s)" -f ($resources.Count - $invalid.Count), $bySub.Count) -ForegroundColor Cyan
+Write-Host ("Loaded {0} unique resource(s) across {1} subscription(s)" -f $info.Count, $bySub.Count) -ForegroundColor Cyan
 Write-Host ("Period: {0:yyyy-MM-dd} to {1:yyyy-MM-dd} ({2})" -f $StartDate, $EndDate, $CostType) -ForegroundColor Cyan
 #endregion
 
@@ -251,25 +274,24 @@ foreach ($sub in $bySub.Keys) {
     foreach ($id in $bySub[$sub]) {
         $lid = $id.ToLowerInvariant()
         $matches_ = @($costs.Keys | Where-Object { $_.StartsWith("$lid|") })
-        $parts = @($id -split '/')
-        $name = $parts[-1]
+        $src = $info[$lid]
 
         if ($failedSubs.ContainsKey($sub)) {
             $output.Add([pscustomobject]@{
-                SubscriptionId = $sub; ResourceName = $name; ResourceId = $id
+                SubscriptionId = $sub; ResourceGroup = $src.ResourceGroup; Type = $src.Type; Name = $src.Name; ResourceId = $id
                 Cost = $null; Currency = $null; Status = 'Failed'; Message = $failedSubs[$sub]
             })
         }
         elseif ($matches_.Count -eq 0) {
             $output.Add([pscustomobject]@{
-                SubscriptionId = $sub; ResourceName = $name; ResourceId = $id
+                SubscriptionId = $sub; ResourceGroup = $src.ResourceGroup; Type = $src.Type; Name = $src.Name; ResourceId = $id
                 Cost = 0; Currency = $null; Status = 'NoCost'; Message = 'No cost recorded for the period'
             })
         }
         else {
             foreach ($k in $matches_) {
                 $output.Add([pscustomobject]@{
-                    SubscriptionId = $sub; ResourceName = $name; ResourceId = $id
+                    SubscriptionId = $sub; ResourceGroup = $src.ResourceGroup; Type = $src.Type; Name = $src.Name; ResourceId = $id
                     Cost = [math]::Round($costs[$k], 4); Currency = $k.Substring($lid.Length + 1)
                     Status = 'OK'; Message = ''
                 })
