@@ -6,10 +6,8 @@
 
 .DESCRIPTION
     The CSV can contain resources from many subscriptions. The script:
-      1. Reads the CSV (columns: name, type, resourceGroup, subscriptionId) and builds the
-         full resource ID for each row. For child resources use the full type and a
-         slash-separated name, e.g. type 'Microsoft.Sql/servers/databases', name 'srv/db'.
-      2. Groups them by subscription.
+      1. Reads full resource IDs from the CSV (column 'ResourceId', or 'ResourceID' / 'Id').
+      2. Groups them by subscription (parsed from the resource ID).
       3. Queries the Cost Management Query API once per subscription (in batches of IDs),
          for the supplied date range, grouped by resource.
       4. Writes a per-resource cost CSV (resources with no cost in the period are included
@@ -82,58 +80,22 @@ $ErrorActionPreference = 'Stop'
 if ($EndDate.Date -lt $StartDate.Date) { throw 'EndDate must be on or after StartDate.' }
 
 #region Helpers
-# Builds a full resource ID from the name / type / resourceGroup / subscriptionId columns.
-# Child resources: type 'Microsoft.Sql/servers/databases' with name 'myserver/mydb' ->
-# .../providers/Microsoft.Sql/servers/myserver/databases/mydb
-function New-ResourceId {
-    param($Row)
-    $sub  = "$($Row.subscriptionId)".Trim()
-    $rg   = "$($Row.resourceGroup)".Trim()
-    $type = "$($Row.type)".Trim().Trim('/')
-    $name = "$($Row.name)".Trim().Trim('/')
-    if ($sub -notmatch '^[0-9a-fA-F-]{36}$' -or -not $rg -or -not $name -or $type -notmatch '^[^/]+/.+') { return $null }
-
-    $typeParts = $type -split '/'
-    $nameParts = $name -split '/'
-    if ($nameParts.Count -ne $typeParts.Count - 1) { return $null }
-
-    $tail = for ($i = 0; $i -lt $nameParts.Count; $i++) { "$($typeParts[$i + 1])/$($nameParts[$i])" }
-    return "/subscriptions/$sub/resourceGroups/$rg/providers/$($typeParts[0])/" + ($tail -join '/')
-}
-
-# Finds full resource IDs by listing the resource group (cached per subscription + RG) and matching
-# type (case-insensitive) and name (exact, or the last segment of 'parent/child').
-function Find-ResourceIds {
-    param($Row)
-    $sub  = "$($Row.subscriptionId)".Trim()
-    $rg   = "$($Row.resourceGroup)".Trim()
-    $type = "$($Row.type)".Trim().Trim('/')
-    $name = "$($Row.name)".Trim().Trim('/')
-    if ($sub -notmatch '^[0-9a-fA-F-]{36}$' -or -not $rg -or -not $name -or -not $type) { return }
-
-    $key = "$sub|$($rg.ToLowerInvariant())"
-    if (-not $rgCache.ContainsKey($key)) {
-        $list = New-Object System.Collections.Generic.List[object]
-        $path = "/subscriptions/$sub/resourceGroups/$rg/resources?api-version=2021-04-01"
-        while ($path) {
-            $response = Invoke-AzRestMethod -Method GET -Path $path
-            if ($response.StatusCode -ne 200) {
-                Write-Warning "Could not list resources in '$rg' ($sub): $($response.StatusCode) $($response.Content)"
-                break
-            }
-            $json = $response.Content | ConvertFrom-Json
-            foreach ($r in @($json.value)) { $list.Add($r) }
-            $next = $json.PSObject.Properties['nextLink']
-            $path = if ($next -and $next.Value) { ([uri]$next.Value).PathAndQuery } else { $null }
-        }
-        $rgCache[$key] = $list
+# Splits a resource ID into subscription / resource group / type / name.
+# Child resources: .../providers/Microsoft.Sql/servers/srv/databases/db -> type 'Microsoft.Sql/servers/databases', name 'srv/db'
+function Get-ResourceIdParts {
+    param([string]$Id)
+    if ($Id -notmatch '^/subscriptions/([0-9a-fA-F-]{36})/resourceGroups/([^/]+)/providers/(.+)$') { return $null }
+    $segments = @($Matches[3].Split('/'))
+    if ($segments.Count -lt 3) { return $null }
+    $types = @($segments[0]) + @(for ($i = 1; $i -lt $segments.Count; $i += 2) { $segments[$i] })
+    $names = @(for ($i = 2; $i -lt $segments.Count; $i += 2) { $segments[$i] })
+    [pscustomobject]@{
+        Sub           = $Matches[1].ToLowerInvariant()
+        ResourceGroup = $Matches[2]
+        Type          = $types -join '/'
+        Name          = $names -join '/'
     }
-
-    $rgCache[$key] | Where-Object {
-        $_.type -ieq $type -and ($_.name -ieq $name -or $_.name -like "*/$name")
-    } | ForEach-Object { $_.id }
 }
-
 # Splits a date range into chunks of at most 12 months (Query API limit is 1 year)
 function Get-DateChunks {
     param([datetime]$From, [datetime]$To)
@@ -196,10 +158,27 @@ if (-not $OutputPath) {
 $rows = @(Import-Csv -Path $resolvedCsv)
 if ($rows.Count -eq 0) { throw "CSV '$resolvedCsv' contains no rows." }
 
-$required = 'name', 'type', 'resourceGroup', 'subscriptionId'
-$columns  = $rows[0].PSObject.Properties.Name
-$missing  = $required | Where-Object { $_ -notin $columns }
-if ($missing) { throw "CSV is missing required column(s): $($missing -join ', ')" }
+$idColumn = 'ResourceId', 'ResourceID', 'Id', 'ID' | Where-Object { $_ -in $rows[0].PSObject.Properties.Name } | Select-Object -First 1
+if (-not $idColumn) { throw "CSV must have a 'ResourceId' column (also accepted: ResourceID, Id)." }
+
+$bySub = @{}       # subscriptionId -> list of resource IDs
+$info  = @{}       # lower-cased resource ID -> parsed details
+foreach ($row in $rows) {
+    $id = "$($row.$idColumn)".Trim().TrimEnd('/')
+    if (-not $id) { continue }
+    $parts = Get-ResourceIdParts $id
+    if (-not $parts) { Write-Warning "Skipping invalid resource ID: $id"; continue }
+    $lid = $id.ToLowerInvariant()
+    if ($info.ContainsKey($lid)) { continue }   # de-duplicate
+    $info[$lid] = $parts
+    if (-not $bySub.ContainsKey($parts.Sub)) { $bySub[$parts.Sub] = New-Object System.Collections.Generic.List[string] }
+    $bySub[$parts.Sub].Add($id)
+}
+if ($info.Count -eq 0) { throw 'No valid resource IDs found in the CSV.' }
+
+Write-Host ("Loaded {0} unique resource(s) across {1} subscription(s)" -f $info.Count, $bySub.Count) -ForegroundColor Cyan
+Write-Host ("Period: {0:yyyy-MM-dd} to {1:yyyy-MM-dd} ({2})" -f $StartDate, $EndDate, $CostType) -ForegroundColor Cyan
+#endregion
 
 #region Connect
 $context = Get-AzContext -ErrorAction SilentlyContinue
@@ -210,48 +189,6 @@ if (-not $context -or ($TenantId -and $context.Tenant.Id -ne $TenantId)) {
     $context = Get-AzContext
 }
 Write-Host "Signed in as $($context.Account.Id) (tenant $($context.Tenant.Id))" -ForegroundColor Cyan
-#endregion
-
-#region Resolve resource IDs
-$bySub = @{}       # subscriptionId -> list of resource IDs
-$info  = @{}       # lower-cased resource ID -> source row details
-$rgCache = @{}     # 'sub|rg' -> resources in that resource group
-$lookups = 0
-
-function Add-Resource {
-    param([string]$Id, $Row)
-    $lid = $Id.ToLowerInvariant()
-    if ($info.ContainsKey($lid)) { return }   # de-duplicate
-    $sub = "$($Row.subscriptionId)".Trim().ToLowerInvariant()
-    # Name segments sit at odd positions after the namespace: Microsoft.Sql/servers/<srv>/databases/<db>
-    $segments = @(($Id -split '/providers/')[-1].Split('/'))
-    $nameParts = for ($i = 2; $i -lt $segments.Count; $i += 2) { $segments[$i] }
-    $info[$lid] = [pscustomobject]@{
-        Id = $Id; Sub = $sub; Name = ($nameParts -join '/')
-        Type = "$($Row.type)".Trim(); ResourceGroup = "$($Row.resourceGroup)".Trim()
-    }
-    if (-not $bySub.ContainsKey($sub)) { $bySub[$sub] = New-Object System.Collections.Generic.List[string] }
-    $bySub[$sub].Add($Id)
-}
-
-foreach ($row in $rows) {
-    $id = New-ResourceId -Row $row
-    if ($id) { Add-Resource -Id $id -Row $row; continue }
-
-    # Child resource with only its short name (e.g. database 'mergers'): find the full ID in Azure
-    $found = @(Find-ResourceIds -Row $row)
-    if ($found.Count -eq 0) {
-        Write-Warning "Skipping row, resource not found: name='$($row.name)' type='$($row.type)' resourceGroup='$($row.resourceGroup)' subscriptionId='$($row.subscriptionId)'"
-        continue
-    }
-    $lookups++
-    if ($found.Count -gt 1) { Write-Warning "'$($row.name)' matched $($found.Count) resources in $($row.resourceGroup); including all of them." }
-    foreach ($f in $found) { Add-Resource -Id $f -Row $row }
-}
-if ($info.Count -eq 0) { throw 'No valid resources found in the CSV.' }
-
-Write-Host ("Loaded {0} unique resource(s) across {1} subscription(s) ({2} resolved via Azure lookup)" -f $info.Count, $bySub.Count, $lookups) -ForegroundColor Cyan
-Write-Host ("Period: {0:yyyy-MM-dd} to {1:yyyy-MM-dd} ({2})" -f $StartDate, $EndDate, $CostType) -ForegroundColor Cyan
 #endregion
 
 #region Query
