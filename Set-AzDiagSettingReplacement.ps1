@@ -1,89 +1,34 @@
-#Requires -Modules Az.Accounts
-<#
-.SYNOPSIS
-    Removes chosen existing diagnostic settings from a list of resources and creates a replacement
-    setting with a specified name, Log Analytics workspace and log/metric categories.
+# Set-AzDiagSettingReplacement.ps1
+#
+# Removes chosen existing diagnostic settings from a list of resources and creates a replacement
+# setting with a specified name, Log Analytics workspace and log categories.
+#
+# Intended for resources where an Azure Policy DeployIfNotExists remediation failed because an existing
+# diagnostic setting already sends the same logs to a workspace (Azure rejects a second setting that
+# uses the same category + destination). Run once per resource type: edit the CONFIG block below, then
+# run the whole script (works as a file OR pasted / "Run Selection" - it does not use param() or $PSCmdlet).
+#
+# For each resource ID in the file:
+#   1. Reads existing diagnostic settings and the log categories the resource supports
+#   2. Validates $LogCategories against what the resource supports (resource skipped if invalid)
+#   3. Lets you choose which existing settings to remove (interactive, or $RemoveSettingName)
+#   4. Backs the removed settings up to JSON, deletes them, creates the new setting, verifies it
+#   5. If creating the new setting fails, the removed settings are restored from the backup
+# Writes report.csv + JSON backups to $BackupFolder.
+#
+# Requires: Connect-AzAccount already done (Az.Accounts).
 
-.DESCRIPTION
-    Intended for resources where an Azure Policy DeployIfNotExists remediation failed because an existing
-    diagnostic setting already sends the same logs to a workspace (Azure rejects a second setting that
-    uses the same category + destination).
-
-    Run once per resource type, passing the replacement name and categories for that type.
-
-    For each resource ID:
-      1. Reads existing diagnostic settings and the categories the resource supports
-      2. Validates the requested -LogCategories against what the
-         resource supports (resource is skipped if any are invalid)
-      3. Lets you choose which existing settings to remove (interactive, or -RemoveSettingName)
-      4. Backs the removed settings up to JSON, deletes them, creates the new setting, and verifies it
-      5. If creating the new setting fails, the removed settings are restored from the backup
-
-    Writes a CSV report. Supports -WhatIf.
-
-.PARAMETER ResourceIdFile
-    .txt file, one resource ID per line (blank lines and # comments ignored).
-
-.PARAMETER NewSettingName
-    Name of the replacement diagnostic setting.
-
-.PARAMETER NewWorkspaceId
-    Full resource ID of the Log Analytics workspace the new setting sends to.
-
-.PARAMETER LogCategories
-    Log categories to enable on the new setting, e.g. AuditEvent. No category groups or metrics are enabled.
-
-.PARAMETER DestinationType
-    Optional logAnalyticsDestinationType: 'Dedicated' (resource-specific tables) or 'AzureDiagnostics'.
-    Omit to leave unset.
-
-.PARAMETER RemoveSettingName
-    Non-interactive: names (wildcards allowed, '*' = all) of existing settings to remove on every resource.
-    If omitted you are prompted per resource.
-
-.PARAMETER Force
-    Skip the final YES confirmation per resource.
-
-.PARAMETER BackupFolder
-    Folder for JSON backups of removed settings and the CSV report.
-
-.EXAMPLE
-    # Key Vaults: pick which existing setting to remove, create 'setByPolicy-kv'
-    .\Set-AzDiagSettingReplacement.ps1 -ResourceIdFile .\keyvaults.txt `
-        -NewSettingName 'setByPolicy-kv' -NewWorkspaceId $law -LogCategories AuditEvent -WhatIf
-
-.EXAMPLE
-    # Remove any setting whose name starts with 'old-'
-    .\Set-AzDiagSettingReplacement.ps1 -ResourceIdFile .\sql.txt -NewSettingName 'setByPolicy-sql' `
-        -NewWorkspaceId $law -LogCategories SQLSecurityAuditEvents,Errors -RemoveSettingName 'old-*'
-#>
-[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
-param(
-    [Parameter(Mandatory)]
-    [ValidateScript({ Test-Path $_ -PathType Leaf })]
-    [string]$ResourceIdFile,
-
-    [Parameter(Mandatory)]
-    [ValidateNotNullOrEmpty()]
-    [string]$NewSettingName,
-
-    [Parameter(Mandatory)]
-    [ValidatePattern('^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.OperationalInsights/workspaces/[^/]+$')]
-    [string]$NewWorkspaceId,
-
-    [Parameter(Mandatory)]
-    [ValidateNotNullOrEmpty()]
-    [string[]]$LogCategories,
-
-    [ValidateSet('Dedicated', 'AzureDiagnostics')]
-    [string]$DestinationType,
-
-    [string[]]$RemoveSettingName,
-
-    [switch]$Force,
-
-    [string]$BackupFolder = ".\DiagSettingBackup_{0}" -f (Get-Date -Format 'yyyyMMdd_HHmmss')
-)
+# ==== CONFIG - edit for each run ===========================================================================
+$ResourceIdFile    = '.\resources.txt'          # one resource ID per line; blank lines / # comments ignored
+$NewSettingName    = 'setByPolicy-xxx'          # name of the replacement diagnostic setting
+$NewWorkspaceId    = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-name'
+$LogCategories     = @('AuditEvent')            # log categories to enable (no groups, no metrics)
+$DestinationType   = ''                         # '' = leave unset | 'Dedicated' | 'AzureDiagnostics'
+$RemoveSettingName = @()                        # @() = prompt per resource | names/wildcards e.g. @('old-*') | @('*') = all
+$DryRun            = $true                      # $true = show the plan only, change nothing
+$SkipConfirm       = $false                     # $true = skip the per-resource YES prompt
+$BackupFolder      = ".\DiagSettingBackup_{0}" -f (Get-Date -Format 'yyyyMMdd_HHmmss')
+# ===========================================================================================================
 
 $ErrorActionPreference = 'Stop'
 $ApiVersion = '2021-05-01-preview'
@@ -92,11 +37,10 @@ $ApiVersion = '2021-05-01-preview'
 
 function Invoke-Arm {
     param([string]$Path, [string]$Method = 'GET', [string]$Body)
-    $WhatIfPreference = $false      # REST calls are gated explicitly with ShouldProcess below
-    $params = @{ Path = $Path; Method = $Method }
-    if ($Body) { $params.Payload = $Body }
+    $p = @{ Path = $Path; Method = $Method }
+    if ($Body) { $p.Payload = $Body }
     for ($attempt = 1; $attempt -le 4; $attempt++) {
-        $resp = Invoke-AzRestMethod @params
+        $resp = Invoke-AzRestMethod @p
         if ($resp.StatusCode -ne 429) { return $resp }
         Start-Sleep -Seconds (10 * $attempt)
     }
@@ -143,9 +87,17 @@ function Get-CleanProperties($Props) {
 
 #region Pre-flight ------------------------------------------------------------
 
-$ctx = Get-AzContext
-if (-not $ctx) { throw "Not logged in. Run Connect-AzAccount first." }
-Write-Host "Signed in as   : $($ctx.Account.Id)" -ForegroundColor Gray
+if (-not (Get-AzContext)) { throw "Not logged in. Run Connect-AzAccount first." }
+if (-not (Test-Path $ResourceIdFile -PathType Leaf)) { throw "Resource file not found: $ResourceIdFile" }
+if ($NewWorkspaceId -notmatch '^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.OperationalInsights/workspaces/[^/]+$') {
+    throw "`$NewWorkspaceId is not a valid Log Analytics workspace resource ID."
+}
+if ($NewWorkspaceId -like '*00000000-0000-0000-0000-000000000000*') { throw "Set `$NewWorkspaceId in the CONFIG block." }
+if ([string]::IsNullOrWhiteSpace($NewSettingName)) { throw "Set `$NewSettingName in the CONFIG block." }
+if (@($LogCategories).Count -eq 0) { throw "Set `$LogCategories in the CONFIG block." }
+if ($DestinationType -and $DestinationType -notin 'Dedicated', 'AzureDiagnostics') {
+    throw "`$DestinationType must be '', 'Dedicated' or 'AzureDiagnostics'."
+}
 
 $ids = Get-Content $ResourceIdFile |
     ForEach-Object { $_.Trim().Trim('"').TrimEnd('/') } |
@@ -157,15 +109,16 @@ if (-not $ids) { throw "No resource IDs found in $ResourceIdFile." }
 $ws = Invoke-Arm -Path "$($NewWorkspaceId)?api-version=2022-10-01"
 if ($ws.StatusCode -ne 200) { throw "Cannot read workspace '$NewWorkspaceId': $(Get-ErrorText $ws)" }
 
+Write-Host "Signed in as   : $((Get-AzContext).Account.Id)" -ForegroundColor Gray
 Write-Host "Resources      : $(@($ids).Count)" -ForegroundColor Gray
 Write-Host "New setting    : $NewSettingName -> $(Get-ShortName $NewWorkspaceId)" -ForegroundColor Gray
 Write-Host "Log categories : $($LogCategories -join ', ')" -ForegroundColor Gray
+Write-Host "Dry run        : $DryRun" -ForegroundColor $(if ($DryRun) { 'Cyan' } else { 'Yellow' })
 
 New-Item -ItemType Directory -Path $BackupFolder -Force | Out-Null
 
 # The new setting body is the same for every resource of this type
-$newLogs = @($LogCategories | ForEach-Object { @{ category = $_; enabled = $true } })
-
+$newLogs  = @($LogCategories | ForEach-Object { @{ category = $_; enabled = $true } })
 $newProps = [ordered]@{ workspaceId = $NewWorkspaceId; logs = $newLogs }
 if ($DestinationType) { $newProps.logAnalyticsDestinationType = $DestinationType }
 $newBody = @{ properties = $newProps } | ConvertTo-Json -Depth 20
@@ -179,7 +132,7 @@ function Add-Result($Id, $Status, $Removed, $Detail) {
     $results.Add([pscustomobject]@{
         Status = $Status; Resource = Get-ShortName $Id; Removed = ($Removed -join '; ')
         NewSetting = $NewSettingName; Detail = $Detail; ResourceId = $Id })
-    $c = switch ($Status) { 'REPLACED' { 'Green' } 'WHATIF' { 'Cyan' } 'SKIPPED' { 'DarkGray' } default { 'Red' } }
+    $c = switch ($Status) { 'REPLACED' { 'Green' } 'DRYRUN' { 'Cyan' } 'SKIPPED' { 'DarkGray' } default { 'Red' } }
     Write-Host ("  [{0}] {1}" -f $Status, $Detail) -ForegroundColor $c
 }
 
@@ -219,8 +172,8 @@ foreach ($id in $ids) {
             $p = $s.properties
             Write-Host ("    {0}. {1}" -f $i, $s.name) -ForegroundColor Yellow
             Write-Host ("         workspace : {0}" -f (Get-ShortName $p.workspaceId))
-            if ($p.storageAccountId)             { Write-Host ("         storage   : {0}" -f (Get-ShortName $p.storageAccountId)) }
-            if ($p.eventHubAuthorizationRuleId)  { Write-Host ("         eventhub  : {0}" -f (Get-ShortName $p.eventHubName)) }
+            if ($p.storageAccountId)            { Write-Host ("         storage   : {0}" -f (Get-ShortName $p.storageAccountId)) }
+            if ($p.eventHubAuthorizationRuleId) { Write-Host ("         eventhub  : {0}" -f (Get-ShortName $p.eventHubName)) }
             Write-Host ("         categories: {0}" -f (Get-CategorySummary $p))
         }
     } else {
@@ -230,7 +183,7 @@ foreach ($id in $ids) {
     # --- choose which to remove
     $toRemove = @()
     if ($existing.Count -gt 0) {
-        if ($PSBoundParameters.ContainsKey('RemoveSettingName')) {
+        if (@($RemoveSettingName).Count -gt 0) {
             $toRemove = @($existing | Where-Object {
                 $nm = $_.name
                 [bool]($RemoveSettingName | Where-Object { $nm -like $_ })
@@ -245,8 +198,8 @@ foreach ($id in $ids) {
         }
     }
 
-    # Setting that already has the new name is overwritten by the PUT; no delete needed
-    $toDelete = @($toRemove | Where-Object { $_.name -ine $NewSettingName })
+    # A setting that already has the new name is overwritten by the PUT; no delete needed
+    $toDelete  = @($toRemove | Where-Object { $_.name -ine $NewSettingName })
     $nameClash = @($existing | Where-Object { $_.name -ieq $NewSettingName -and $_ -notin $toRemove })
     if ($nameClash) {
         Write-Host "  Note: '$NewSettingName' already exists and was not selected - it will be overwritten." -ForegroundColor DarkYellow
@@ -256,20 +209,22 @@ foreach ($id in $ids) {
         Add-Result $id 'SKIPPED' @() 'Nothing selected for removal'
         continue
     }
-    if (($existing.Count - $toDelete.Count + $(if ($existing.name -icontains $NewSettingName) { 0 } else { 1 })) -gt 5) {
+    $newCount = $existing.Count - $toDelete.Count + $(if ($existing.name -icontains $NewSettingName) { 0 } else { 1 })
+    if ($newCount -gt 5) {
         Add-Result $id 'SKIPPED' @() 'Would exceed the limit of 5 diagnostic settings per resource'
         continue
     }
 
     Write-Host ("  Plan: remove [{0}]  ->  create '{1}'" -f (($toDelete.name) -join ', '), $NewSettingName) -ForegroundColor Cyan
 
-    # --- confirm
-    if (-not $WhatIfPreference -and -not $Force) {
-        if ((Read-Host "  Type YES to apply") -cne 'YES') { Add-Result $id 'SKIPPED' @() 'Declined by user'; continue }
-    }
-    if (-not $PSCmdlet.ShouldProcess($id, "Remove [$(($toDelete.name) -join ', ')] and create '$NewSettingName'")) {
-        Add-Result $id 'WHATIF' $toDelete.name 'No change made (-WhatIf)'
+    if ($DryRun) {
+        Add-Result $id 'DRYRUN' $toDelete.name 'No change made ($DryRun = $true)'
         continue
+    }
+
+    # --- confirm
+    if (-not $SkipConfirm) {
+        if ((Read-Host "  Type YES to apply") -cne 'YES') { Add-Result $id 'SKIPPED' @() 'Declined by user'; continue }
     }
 
     # --- backup, delete, create, verify (restore on failure)
@@ -317,7 +272,7 @@ foreach ($id in $ids) {
 Write-Host ""
 Write-Host ("=" * 80) -ForegroundColor Cyan
 $results | Group-Object Status | Sort-Object Name | ForEach-Object {
-    $c = switch ($_.Name) { 'REPLACED' { 'Green' } 'WHATIF' { 'Cyan' } 'SKIPPED' { 'DarkGray' } default { 'Red' } }
+    $c = switch ($_.Name) { 'REPLACED' { 'Green' } 'DRYRUN' { 'Cyan' } 'SKIPPED' { 'DarkGray' } default { 'Red' } }
     Write-Host ("  {0,-9}: {1}" -f $_.Name, $_.Count) -ForegroundColor $c
 }
 $report = Join-Path $BackupFolder 'report.csv'
