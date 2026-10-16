@@ -13,7 +13,7 @@
 
     For each resource ID:
       1. Reads existing diagnostic settings and the categories the resource supports
-      2. Validates the requested -LogCategories / -CategoryGroups / -MetricCategories against what the
+      2. Validates the requested -LogCategories against what the
          resource supports (resource is skipped if any are invalid)
       3. Lets you choose which existing settings to remove (interactive, or -RemoveSettingName)
       4. Backs the removed settings up to JSON, deletes them, creates the new setting, and verifies it
@@ -30,15 +30,8 @@
 .PARAMETER NewWorkspaceId
     Full resource ID of the Log Analytics workspace the new setting sends to.
 
-.PARAMETER CategoryGroups
-    Log category groups to enable, e.g. allLogs, audit. Default: allLogs
-    (use -CategoryGroups @() together with -LogCategories to pick individual categories).
-
 .PARAMETER LogCategories
-    Individual log categories to enable, e.g. AuditEvent. Used in addition to any -CategoryGroups.
-
-.PARAMETER MetricCategories
-    Metric categories to enable, e.g. AllMetrics. Default: none.
+    Log categories to enable on the new setting, e.g. AuditEvent. No category groups or metrics are enabled.
 
 .PARAMETER DestinationType
     Optional logAnalyticsDestinationType: 'Dedicated' (resource-specific tables) or 'AzureDiagnostics'.
@@ -55,15 +48,14 @@
     Folder for JSON backups of removed settings and the CSV report.
 
 .EXAMPLE
-    # Key Vaults: remove whatever setting you pick, create 'setByPolicy-kv' with allLogs
+    # Key Vaults: pick which existing setting to remove, create 'setByPolicy-kv'
     .\Set-AzDiagSettingReplacement.ps1 -ResourceIdFile .\keyvaults.txt `
-        -NewSettingName 'setByPolicy-kv' -NewWorkspaceId $law -CategoryGroups allLogs -WhatIf
+        -NewSettingName 'setByPolicy-kv' -NewWorkspaceId $law -LogCategories AuditEvent -WhatIf
 
 .EXAMPLE
-    # Specific categories + metrics, remove any setting whose name starts with 'old-'
+    # Remove any setting whose name starts with 'old-'
     .\Set-AzDiagSettingReplacement.ps1 -ResourceIdFile .\sql.txt -NewSettingName 'setByPolicy-sql' `
-        -NewWorkspaceId $law -CategoryGroups @() -LogCategories SQLSecurityAuditEvents,Errors `
-        -MetricCategories AllMetrics -RemoveSettingName 'old-*'
+        -NewWorkspaceId $law -LogCategories SQLSecurityAuditEvents,Errors -RemoveSettingName 'old-*'
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -79,9 +71,9 @@ param(
     [ValidatePattern('^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.OperationalInsights/workspaces/[^/]+$')]
     [string]$NewWorkspaceId,
 
-    [string[]]$CategoryGroups = @('allLogs'),
-    [string[]]$LogCategories = @(),
-    [string[]]$MetricCategories = @(),
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string[]]$LogCategories,
 
     [ValidateSet('Dedicated', 'AzureDiagnostics')]
     [string]$DestinationType,
@@ -95,10 +87,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ApiVersion = '2021-05-01-preview'
-
-if (-not $CategoryGroups -and -not $LogCategories -and -not $MetricCategories) {
-    throw "Specify at least one of -CategoryGroups, -LogCategories or -MetricCategories."
-}
 
 #region Helpers ---------------------------------------------------------------
 
@@ -171,22 +159,14 @@ if ($ws.StatusCode -ne 200) { throw "Cannot read workspace '$NewWorkspaceId': $(
 
 Write-Host "Resources      : $(@($ids).Count)" -ForegroundColor Gray
 Write-Host "New setting    : $NewSettingName -> $(Get-ShortName $NewWorkspaceId)" -ForegroundColor Gray
-Write-Host "Log groups     : $(if ($CategoryGroups) { $CategoryGroups -join ', ' } else { '-' })" -ForegroundColor Gray
-Write-Host "Log categories : $(if ($LogCategories) { $LogCategories -join ', ' } else { '-' })" -ForegroundColor Gray
-Write-Host "Metrics        : $(if ($MetricCategories) { $MetricCategories -join ', ' } else { '-' })" -ForegroundColor Gray
+Write-Host "Log categories : $($LogCategories -join ', ')" -ForegroundColor Gray
 
 New-Item -ItemType Directory -Path $BackupFolder -Force | Out-Null
 
 # The new setting body is the same for every resource of this type
-$newLogs = @()
-foreach ($g in $CategoryGroups)  { $newLogs += @{ categoryGroup = $g; enabled = $true } }
-foreach ($c in $LogCategories)   { $newLogs += @{ category = $c;      enabled = $true } }
-$newMetrics = @()
-foreach ($m in $MetricCategories) { $newMetrics += @{ category = $m; enabled = $true } }
+$newLogs = @($LogCategories | ForEach-Object { @{ category = $_; enabled = $true } })
 
-$newProps = [ordered]@{ workspaceId = $NewWorkspaceId }
-if ($newLogs)    { $newProps.logs    = $newLogs }
-if ($newMetrics) { $newProps.metrics = $newMetrics }
+$newProps = [ordered]@{ workspaceId = $NewWorkspaceId; logs = $newLogs }
 if ($DestinationType) { $newProps.logAnalyticsDestinationType = $DestinationType }
 $newBody = @{ properties = $newProps } | ConvertTo-Json -Depth 20
 
@@ -218,17 +198,12 @@ foreach ($id in $ids) {
     $catResp = Invoke-Arm -Path "$id/providers/Microsoft.Insights/diagnosticSettingsCategories?api-version=$ApiVersion"
     if ($catResp.StatusCode -eq 200) {
         $cats = @(($catResp.Content | ConvertFrom-Json).value)
-        $logCats    = @($cats | Where-Object { $_.properties.categoryType -eq 'Logs' }    | ForEach-Object name)
-        $metricCats = @($cats | Where-Object { $_.properties.categoryType -eq 'Metrics' } | ForEach-Object name)
-        $groups     = @($cats | ForEach-Object { $_.properties.categoryGroups } | Where-Object { $_ } | Select-Object -Unique)
+        $logCats = @($cats | Where-Object { $_.properties.categoryType -eq 'Logs' } | ForEach-Object name)
 
-        $bad = @()
-        $bad += $LogCategories    | Where-Object { $_ -and $logCats    -inotcontains $_ } | ForEach-Object { "log category '$_'" }
-        $bad += $MetricCategories | Where-Object { $_ -and $metricCats -inotcontains $_ } | ForEach-Object { "metric category '$_'" }
-        $bad += $CategoryGroups   | Where-Object { $_ -and $groups    -inotcontains $_ } | ForEach-Object { "category group '$_'" }
+        $bad = @($LogCategories | Where-Object { $logCats -inotcontains $_ })
         if ($bad) {
-            Add-Result $id 'SKIPPED' @() ("Not supported by this resource: {0}. Supported logs: {1}; groups: {2}; metrics: {3}" -f
-                ($bad -join ', '), ($logCats -join ','), ($groups -join ','), ($metricCats -join ','))
+            Add-Result $id 'SKIPPED' @() ("Log categories not supported by this resource: {0}. Supported: {1}" -f
+                ($bad -join ', '), ($logCats -join ', '))
             continue
         }
     } else {
