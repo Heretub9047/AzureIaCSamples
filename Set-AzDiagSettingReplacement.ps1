@@ -22,7 +22,8 @@
 $ResourceIdFile    = '.\resources.txt'          # one resource ID per line; blank lines / # comments ignored
 $NewSettingName    = 'setByPolicy-xxx'          # name of the replacement diagnostic setting
 $NewWorkspaceId    = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-name'
-$LogCategories     = @('AuditEvent')            # log categories to enable (no groups, no metrics)
+$LogCategories     = @('AuditEvent')            # log categories to enable (no category groups)
+$MetricCategories  = @()                        # metric categories e.g. @('AllMetrics') | @() or $null = no metrics added
 $DestinationType   = ''                         # '' = leave unset | 'Dedicated' | 'AzureDiagnostics'
 $RemoveSettingName = @()                        # @() = prompt per resource | names/wildcards e.g. @('old-*') | @('*') = all
 $DryRun            = $true                      # $true = show the plan only, change nothing
@@ -113,6 +114,8 @@ Write-Host "Signed in as   : $((Get-AzContext).Account.Id)" -ForegroundColor Gra
 Write-Host "Resources      : $(@($ids).Count)" -ForegroundColor Gray
 Write-Host "New setting    : $NewSettingName -> $(Get-ShortName $NewWorkspaceId)" -ForegroundColor Gray
 Write-Host "Log categories : $($LogCategories -join ', ')" -ForegroundColor Gray
+$MetricCategories = @($MetricCategories | Where-Object { $_ -and $_.Trim() })    # $null / '' -> no metrics
+Write-Host "Metrics        : $(if ($MetricCategories) { $MetricCategories -join ', ' } else { '(none)' })" -ForegroundColor Gray
 Write-Host "Dry run        : $DryRun" -ForegroundColor $(if ($DryRun) { 'Cyan' } else { 'Yellow' })
 
 New-Item -ItemType Directory -Path $BackupFolder -Force | Out-Null
@@ -120,6 +123,9 @@ New-Item -ItemType Directory -Path $BackupFolder -Force | Out-Null
 # The new setting body is the same for every resource of this type
 $newLogs  = @($LogCategories | ForEach-Object { @{ category = $_; enabled = $true } })
 $newProps = [ordered]@{ workspaceId = $NewWorkspaceId; logs = $newLogs }
+if ($MetricCategories.Count -gt 0) {
+    $newProps.metrics = @($MetricCategories | ForEach-Object { @{ category = $_; enabled = $true } })
+}
 if ($DestinationType) { $newProps.logAnalyticsDestinationType = $DestinationType }
 $newBody = @{ properties = $newProps } | ConvertTo-Json -Depth 20
 
@@ -153,10 +159,13 @@ foreach ($id in $ids) {
         $cats = @(($catResp.Content | ConvertFrom-Json).value)
         $logCats = @($cats | Where-Object { $_.properties.categoryType -eq 'Logs' } | ForEach-Object name)
 
-        $bad = @($LogCategories | Where-Object { $logCats -inotcontains $_ })
+        $metricCats = @($cats | Where-Object { $_.properties.categoryType -eq 'Metrics' } | ForEach-Object name)
+
+        $bad  = @($LogCategories    | Where-Object { $logCats    -inotcontains $_ } | ForEach-Object { "log '$_'" })
+        $bad += @($MetricCategories | Where-Object { $metricCats -inotcontains $_ } | ForEach-Object { "metric '$_'" })
         if ($bad) {
-            Add-Result $id 'SKIPPED' @() ("Log categories not supported by this resource: {0}. Supported: {1}" -f
-                ($bad -join ', '), ($logCats -join ', '))
+            Add-Result $id 'SKIPPED' @() ("Not supported by this resource: {0}. Supported logs: {1}; metrics: {2}" -f
+                ($bad -join ', '), ($logCats -join ', '), ($metricCats -join ', '))
             continue
         }
     } else {
