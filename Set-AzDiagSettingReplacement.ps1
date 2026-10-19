@@ -22,7 +22,7 @@
 $ResourceIdFile    = '.\resources.txt'          # one resource ID per line; blank lines / # comments ignored
 $NewSettingName    = 'setByPolicy-xxx'          # name of the replacement diagnostic setting
 $NewWorkspaceId    = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-name'
-$LogCategories     = @('AuditEvent')            # log categories to enable (no category groups)
+$LogCategories     = @('AuditEvent')            # log categories to enable (no category groups) | @() = no logs (then set metrics)
 $MetricCategories  = @()                        # metric categories e.g. @('AllMetrics') | @() or $null = no metrics added
 $DestinationType   = ''                         # '' = leave unset | 'Dedicated' | 'AzureDiagnostics'
 $RemoveSettingName = @()                        # @() = prompt per resource | names/wildcards e.g. @('old-*') | @('*') = all
@@ -95,7 +95,11 @@ if ($NewWorkspaceId -notmatch '^/subscriptions/[^/]+/resourceGroups/[^/]+/provid
 }
 if ($NewWorkspaceId -like '*00000000-0000-0000-0000-000000000000*') { throw "Set `$NewWorkspaceId in the CONFIG block." }
 if ([string]::IsNullOrWhiteSpace($NewSettingName)) { throw "Set `$NewSettingName in the CONFIG block." }
-if (@($LogCategories).Count -eq 0) { throw "Set `$LogCategories in the CONFIG block." }
+$LogCategories    = @($LogCategories    | Where-Object { $_ -and $_.Trim() })    # $null / '' -> none
+$MetricCategories = @($MetricCategories | Where-Object { $_ -and $_.Trim() })
+if ($LogCategories.Count -eq 0 -and $MetricCategories.Count -eq 0) {
+    throw "Set at least one of `$LogCategories or `$MetricCategories in the CONFIG block."
+}
 if ($DestinationType -and $DestinationType -notin 'Dedicated', 'AzureDiagnostics') {
     throw "`$DestinationType must be '', 'Dedicated' or 'AzureDiagnostics'."
 }
@@ -113,16 +117,17 @@ if ($ws.StatusCode -ne 200) { throw "Cannot read workspace '$NewWorkspaceId': $(
 Write-Host "Signed in as   : $((Get-AzContext).Account.Id)" -ForegroundColor Gray
 Write-Host "Resources      : $(@($ids).Count)" -ForegroundColor Gray
 Write-Host "New setting    : $NewSettingName -> $(Get-ShortName $NewWorkspaceId)" -ForegroundColor Gray
-Write-Host "Log categories : $($LogCategories -join ', ')" -ForegroundColor Gray
-$MetricCategories = @($MetricCategories | Where-Object { $_ -and $_.Trim() })    # $null / '' -> no metrics
+Write-Host "Log categories : $(if ($LogCategories) { $LogCategories -join ', ' } else { '(none)' })" -ForegroundColor Gray
 Write-Host "Metrics        : $(if ($MetricCategories) { $MetricCategories -join ', ' } else { '(none)' })" -ForegroundColor Gray
 Write-Host "Dry run        : $DryRun" -ForegroundColor $(if ($DryRun) { 'Cyan' } else { 'Yellow' })
 
 New-Item -ItemType Directory -Path $BackupFolder -Force | Out-Null
 
 # The new setting body is the same for every resource of this type
-$newLogs  = @($LogCategories | ForEach-Object { @{ category = $_; enabled = $true } })
-$newProps = [ordered]@{ workspaceId = $NewWorkspaceId; logs = $newLogs }
+$newProps = [ordered]@{ workspaceId = $NewWorkspaceId }
+if ($LogCategories.Count -gt 0) {
+    $newProps.logs = @($LogCategories | ForEach-Object { @{ category = $_; enabled = $true } })
+}
 if ($MetricCategories.Count -gt 0) {
     $newProps.metrics = @($MetricCategories | ForEach-Object { @{ category = $_; enabled = $true } })
 }
