@@ -1,0 +1,152 @@
+{
+  "properties": {
+    "displayName": "SQL servers should send auditing to the designated Log Analytics workspace",
+    "description": "Checks the master database of every Azure SQL logical server for a diagnostic setting that sends SQLSecurityAuditEvents to the specified Log Analytics workspace. If missing (or pointing at a different workspace), remediation enables server auditing with Azure Monitor as a target and deploys the diagnostic setting.",
+    "policyType": "Custom",
+    "mode": "All",
+    "metadata": {
+      "category": "SQL",
+      "version": "1.0.0"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Effect"
+        },
+        "allowedValues": [
+          "DeployIfNotExists",
+          "AuditIfNotExists",
+          "Disabled"
+        ],
+        "defaultValue": "DeployIfNotExists"
+      },
+      "logAnalyticsWorkspaceId": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Log Analytics workspace",
+          "description": "Full resource ID of the workspace, e.g. /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<name>",
+          "strongType": "omsWorkspace",
+          "assignPermissions": true
+        }
+      },
+      "diagnosticSettingName": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Diagnostic setting name"
+        },
+        "defaultValue": "SQLSecurityAuditEvents_3d229c42-c7e7-4c97-9a99-ec0d0d8b86c1"
+      }
+    },
+    "policyRule": {
+      "if": {
+        "allOf": [
+          {
+            "field": "type",
+            "equals": "Microsoft.Sql/servers/databases"
+          },
+          {
+            "field": "name",
+            "equals": "master"
+          }
+        ]
+      },
+      "then": {
+        "effect": "[parameters('effect')]",
+        "details": {
+          "type": "Microsoft.Insights/diagnosticSettings",
+          "evaluationDelay": "AfterProvisioning",
+          "roleDefinitionIds": [
+            "/providers/Microsoft.Authorization/roleDefinitions/056cd41c-7e88-42e1-933e-88ba6a50c9c3",
+            "/providers/Microsoft.Authorization/roleDefinitions/749f88d5-cbae-40b8-bcfc-e573ddc772fa",
+            "/providers/Microsoft.Authorization/roleDefinitions/92aaf0da-9dab-42b6-94a3-d43ce8d16293"
+          ],
+          "existenceCondition": {
+            "allOf": [
+              {
+                "field": "Microsoft.Insights/diagnosticSettings/workspaceId",
+                "equals": "[parameters('logAnalyticsWorkspaceId')]"
+              },
+              {
+                "count": {
+                  "field": "Microsoft.Insights/diagnosticSettings/logs[*]",
+                  "where": {
+                    "allOf": [
+                      {
+                        "field": "Microsoft.Insights/diagnosticSettings/logs[*].category",
+                        "equals": "SQLSecurityAuditEvents"
+                      },
+                      {
+                        "field": "Microsoft.Insights/diagnosticSettings/logs[*].enabled",
+                        "equals": "true"
+                      }
+                    ]
+                  }
+                },
+                "greaterOrEquals": 1
+              }
+            ]
+          },
+          "deployment": {
+            "properties": {
+              "mode": "incremental",
+              "parameters": {
+                "serverName": {
+                  "value": "[first(split(field('fullName'), '/'))]"
+                },
+                "logAnalyticsWorkspaceId": {
+                  "value": "[parameters('logAnalyticsWorkspaceId')]"
+                },
+                "diagnosticSettingName": {
+                  "value": "[parameters('diagnosticSettingName')]"
+                }
+              },
+              "template": {
+                "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                "contentVersion": "1.0.0.0",
+                "parameters": {
+                  "serverName": { "type": "string" },
+                  "logAnalyticsWorkspaceId": { "type": "string" },
+                  "diagnosticSettingName": { "type": "string" }
+                },
+                "resources": [
+                  {
+                    "type": "Microsoft.Sql/servers/databases/providers/diagnosticSettings",
+                    "apiVersion": "2021-05-01-preview",
+                    "name": "[concat(parameters('serverName'), '/master/microsoft.insights/', parameters('diagnosticSettingName'))]",
+                    "properties": {
+                      "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                      "logs": [
+                        {
+                          "category": "SQLSecurityAuditEvents",
+                          "enabled": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "Microsoft.Sql/servers/auditingSettings",
+                    "apiVersion": "2021-11-01",
+                    "name": "[concat(parameters('serverName'), '/default')]",
+                    "dependsOn": [
+                      "[resourceId('Microsoft.Sql/servers/databases/providers/diagnosticSettings', parameters('serverName'), 'master', 'microsoft.insights', parameters('diagnosticSettingName'))]"
+                    ],
+                    "properties": {
+                      "state": "Enabled",
+                      "isAzureMonitorTargetEnabled": true,
+                      "auditActionsAndGroups": [
+                        "SUCCESSFUL_DATABASE_AUTHENTICATION_GROUP",
+                        "FAILED_DATABASE_AUTHENTICATION_GROUP",
+                        "BATCH_COMPLETED_GROUP"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
