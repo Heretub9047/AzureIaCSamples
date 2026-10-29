@@ -78,7 +78,10 @@ param(
     [int]$CacheHours = 24,          # how long cached retail prices, price sheets and reservation quotes stay valid
     [switch]$RefreshCache,          # ignore existing cache entries (new results are still written)
     [switch]$NoCache,               # don't read or write the disk cache
-    [switch]$BuildCache             # download the complete agreement price sheet(s) into the cache, then exit
+    [switch]$BuildCache,            # pre-load the agreement price sheet(s) into the cache, then exit
+    [string[]]$BuildServices = @('Virtual Machines', 'Azure App Service', 'SQL Database', 'Microsoft Fabric'),
+    [string[]]$BuildRegions  = @('australiaeast', 'australiasoutheast', 'australiacentral'),  # 'all' = every region
+    [switch]$BuildAll               # -BuildCache: keep the entire price sheet, ignoring the service/region filter
 )
 
 $ErrorActionPreference = 'Stop'
@@ -98,12 +101,16 @@ if (-not $CacheDir) {
     $root = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::GetTempPath() }
     $CacheDir = Join-Path $root 'AzurePricingCache'
 }
+# .NET file APIs resolve relative paths against the process directory, not PowerShell's current location,
+# so make the cache path absolute up front.
+$CacheDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDir)
 $script:MemCache = @{}
 $script:SheetMem = @{}
 
 function Get-CacheFile([string]$Name, [string]$Ext = '.json') {
     $h = [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Name))
-    Join-Path $CacheDir (([BitConverter]::ToString($h) -replace '-', '') + $Ext)
+    $readable = ($Name -replace '[^A-Za-z0-9]+', '_'); if ($readable.Length -gt 40) { $readable = $readable.Substring(0, 40) }
+    Join-Path $CacheDir ($readable + '_' + ([BitConverter]::ToString($h[0..3]) -replace '-', '') + $Ext)
 }
 
 function Read-Cache([string]$Name, [switch]$NoMem) {
@@ -431,6 +438,7 @@ function Write-SheetFile([string]$Key, $S) {
             foreach ($k in $S.Prices.Keys) { $w.WriteLine($k + "`t" + $S.Prices[$k].ToString('R', [Globalization.CultureInfo]::InvariantCulture)) }
             foreach ($a in $S.Absent) { $w.WriteLine('!' + $a) }
         } finally { $w.Dispose() }
+        Write-Host "  saved price sheet cache: $(Get-CacheFile "sheet|$Key" '.tsv')"
     } catch { Write-Warning "Could not write price sheet cache: $($_.Exception.Message)" }
 }
 
@@ -632,9 +640,24 @@ if ($BuildCache) {
         Get-Content $InputFile | ForEach-Object { (Split-ResourceId $_).Sub } | Where-Object { $_ } | Select-Object -Unique
     } else { Get-AzSubscription | Where-Object { $_.State -eq 'Enabled' } | ForEach-Object Id }
     Write-Host "Building price sheet cache for $(@($subs).Count) subscription(s)..."
+    $wanted = $null
+    if (-not $BuildAll) {
+        # The price sheet API has no server-side filter, so work out which meters matter from the Retail API
+        # (the same meterIds appear on the price sheet) and keep only those. Paging stops once all are found.
+        $wanted = New-Object 'System.Collections.Generic.HashSet[string]'
+        $regs = if ($BuildRegions -contains 'all') { @($null) } else { $BuildRegions }
+        foreach ($svc in $BuildServices) {
+            foreach ($rg in $regs) {
+                $flt = "serviceName eq '$svc' and priceType eq 'Consumption'"
+                if ($rg) { $flt += " and armRegionName eq '$rg'" }
+                foreach ($it in (Get-RetailItems $flt)) { [void]$wanted.Add($it.meterId.ToLowerInvariant()) }
+            }
+        }
+        Write-Host "Keeping $($wanted.Count) meters ($($BuildServices -join ', ') in $($BuildRegions -join ', '))"
+    }
     $sheets = @{}
     foreach ($sub in $subs) {
-        $r = Get-AgreementSheet $sub $null $sheets -Full
+        $r = if ($BuildAll) { Get-AgreementSheet $sub $null $sheets -Full } else { Get-AgreementSheet $sub $wanted $sheets }
         if ($r -is [string]) { Write-Warning "$sub : $r" }
     }
     Write-Host "Price sheet cache built in $CacheDir (valid for $CacheHours hours). Run again without -BuildCache to price resources."
