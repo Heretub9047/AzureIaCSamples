@@ -29,8 +29,8 @@
 
     All "per month" values are for the full SKU count, using -HoursPerMonth (default 730).
     SKU Count means: VM = 1, App Service Plan = instances, SQL = vCores (DTU = 1), Fabric = 1 (priced per CU).
-    Windows VMs without Azure Hybrid Benefit: reservation prices are compute-only RI price plus the
-    Windows licence uplift (public Windows rate minus public Linux rate), so the columns are comparable.
+    VMs are always priced compute-only (the base/Linux meter): no Windows or other OS licence cost
+    is included in any column, regardless of the VM's OS or Azure Hybrid Benefit setting.
 
 .PARAMETER InputFile            Text file of resource IDs.
 .PARAMETER OutputFile           CSV path (default: AzurePricing_<timestamp>.csv in the current folder).
@@ -154,15 +154,11 @@ function Get-VmPricing([string]$Loc, [string]$Size, [string]$OsType, [string]$Li
     $items = @(Get-RetailItems "serviceName eq 'Virtual Machines' and armRegionName eq '$Loc' and armSkuName eq '$Size' and priceType eq 'Consumption'") |
         Where-Object { "$($_.skuName) $($_.meterName)" -notmatch 'Spot|Low Priority' -and $_.productName -notmatch 'Cloud Services' }
     $lin = $items | Where-Object { $_.productName -notmatch 'Windows' } | Select-Object -First 1
-    $win = $items | Where-Object { $_.productName -match 'Windows' }    | Select-Object -First 1
     if (-not $lin) { $p.Supported = $false; $p.Notes.Add("No retail price found for $Size in $Loc"); return $p }
-    $ahb    = $License -in 'Windows_Server', 'Windows_Client'
-    $useWin = ($OsType -eq 'Windows') -and -not $ahb
-    if ($useWin -and -not $win) { $p.Supported = $false; $p.Notes.Add("No Windows retail price for $Size in $Loc"); return $p }
-    $p.Components  = @([pscustomobject]@{ Item = $(if ($useWin) { $win } else { $lin }); Factor = $script:Hours; Qty = 1 })
+    # Compute only: always the base (non-Windows) meter, so no OS licence is ever included
+    $p.Components  = @([pscustomobject]@{ Item = $lin; Factor = $script:Hours; Qty = 1 })
     $p.ResFallback = @([pscustomobject]@{ MeterId = $lin.meterId; Qty = 1 })
-    if ($useWin) { $p.Uplift = ($win.retailPrice - $lin.retailPrice) * $script:Hours; $p.Notes.Add('Reservation columns include Windows licence at PAYG rate') }
-    if ($ahb)    { $p.Notes.Add("Azure Hybrid Benefit ($License): Linux/base compute rate used") }
+    if ($OsType -eq 'Windows') { $p.Notes.Add('Windows licence excluded: compute-only pricing for all columns') }
     $p
 }
 
