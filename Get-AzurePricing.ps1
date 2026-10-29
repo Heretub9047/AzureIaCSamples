@@ -33,7 +33,9 @@
 
     Caching: retail prices, price sheet rates and successful reservation quotes are cached in memory and in
     -CacheDir (default %LOCALAPPDATA%\AzurePricingCache) for -CacheHours (default 24). Use -RefreshCache to
-    force fresh lookups or -NoCache to turn the disk cache off. Resource details (ARM) are never cached, and
+    force fresh lookups or -NoCache to turn the disk cache off. Run once with -BuildCache to download the
+    COMPLETE agreement price sheet into the cache (all subscriptions in -InputFile, or all enabled
+    subscriptions if no file is given) and exit; normal runs then search the local cache with no price sheet calls. Resource details (ARM) are never cached, and
     failed reservation calculations are not cached so they are retried next run.
 
     All "per month" values are for the full SKU count, using -HoursPerMonth (default 730).
@@ -75,7 +77,8 @@ param(
     [string]$CacheDir,              # default: %LOCALAPPDATA%\AzurePricingCache
     [int]$CacheHours = 24,          # how long cached retail prices, price sheets and reservation quotes stay valid
     [switch]$RefreshCache,          # ignore existing cache entries (new results are still written)
-    [switch]$NoCache                # don't read or write the disk cache
+    [switch]$NoCache,               # don't read or write the disk cache
+    [switch]$BuildCache             # download the complete agreement price sheet(s) into the cache, then exit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -96,10 +99,11 @@ if (-not $CacheDir) {
     $CacheDir = Join-Path $root 'AzurePricingCache'
 }
 $script:MemCache = @{}
+$script:SheetMem = @{}
 
-function Get-CacheFile([string]$Name) {
+function Get-CacheFile([string]$Name, [string]$Ext = '.json') {
     $h = [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Name))
-    Join-Path $CacheDir (([BitConverter]::ToString($h) -replace '-', '') + '.json')
+    Join-Path $CacheDir (([BitConverter]::ToString($h) -replace '-', '') + $Ext)
 }
 
 function Read-Cache([string]$Name, [switch]$NoMem) {
@@ -370,47 +374,115 @@ function Get-SubscriptionPriceMap([string]$SubId, $Meters) {
         $j = Get-ArmJson $path
         $rows += @($j.properties.pricesheets).Count
         if ($page % 5 -eq 0 -or $page -eq 1) {
-            Write-Host ("  price sheet page {0}: {1} rows scanned, {2}/{3} meters found, {4:N0}s elapsed" -f $page, $rows, $map.Count, $Meters.Count, $sw.Elapsed.TotalSeconds)
+            Write-Host ("  price sheet page {0}: {1} rows scanned, {2}/{3} meters found, {4:N0}s elapsed" -f $page, $rows, $map.Count, $(if ($Meters) { $Meters.Count } else { 'all' }), $sw.Elapsed.TotalSeconds)
         }
-        if ($MaxPriceSheetPages -gt 0 -and $page -gt $MaxPriceSheetPages) { $complete = $false; Write-Warning "Stopped after $MaxPriceSheetPages price sheet pages ($($map.Count)/$($Meters.Count) meters found)"; break }
+        if ($MaxPriceSheetPages -gt 0 -and $page -gt $MaxPriceSheetPages) { $complete = $false; Write-Warning "Stopped after $MaxPriceSheetPages price sheet pages ($($map.Count) meters found)"; break }
         foreach ($r in $j.properties.pricesheets) {
             $mid = "$($r.meterId)".ToLowerInvariant()
-            if (-not $Meters.Contains($mid) -or $map.ContainsKey($mid)) { continue }
+            if (($Meters -and -not $Meters.Contains($mid)) -or $map.ContainsKey($mid)) { continue }
             $div = 1.0
             if ("$($r.unitOfMeasure)" -match '^\s*([\d,]*\.?\d+)') { $div = [double]($Matches[1] -replace ',', ''); if ($div -le 0) { $div = 1.0 } }
             $map[$mid] = [double]$r.unitPrice / $div
             if (-not $cur) { $cur = $r.currencyCode }
         }
-        if ($map.Count -ge $Meters.Count) { $complete = $false; break }
+        if ($Meters -and $map.Count -ge $Meters.Count) { $complete = $false; break }
         $next = $j.properties.nextLink
         $path = if ($next) { ([uri]$next).PathAndQuery } else { $null }
     }
     @{ Prices = $map; Currency = $cur; Complete = $complete }
 }
 
-# Price sheet cache. Stores found rates plus meters confirmed absent after a full scan, so a rerun only
-# fetches meters it has never seen. $Fetch is called with the set of meters still needed.
-function Get-SheetCached([string]$Key, $Meters, [scriptblock]$Fetch) {
-    $cached = Read-Cache "sheet|$Key"
-    $prices = @{}; $cur = ''
-    $absent = New-Object 'System.Collections.Generic.HashSet[string]'
-    if ($cached) {
-        foreach ($pr in $cached.prices.PSObject.Properties) { $prices[$pr.Name] = [double]$pr.Value }
-        foreach ($a in @($cached.absent)) { if ($a) { [void]$absent.Add([string]$a) } }
-        $cur = [string]$cached.currency
+# Price sheet cache, one tab-separated file per sheet: "meterId<TAB>unitPrice" lines, "!meterId" lines for meters
+# confirmed absent, and a header saying whether the file holds the COMPLETE sheet (full=1).
+function Read-SheetFile([string]$Key) {
+    if ($script:SheetMem.ContainsKey($Key)) { return $script:SheetMem[$Key] }
+    if ($NoCache -or $RefreshCache) { return $null }
+    $f = Get-CacheFile "sheet|$Key" '.tsv'
+    if (-not (Test-Path $f)) { return $null }
+    if (((Get-Date) - (Get-Item $f).LastWriteTime).TotalHours -gt $CacheHours) { return $null }
+    $s = @{ Prices = @{}; Absent = (New-Object 'System.Collections.Generic.HashSet[string]'); Currency = ''; Full = $false }
+    try {
+        $first = $true
+        foreach ($line in [IO.File]::ReadLines($f)) {
+            if ($first) {
+                $first = $false
+                foreach ($h in $line.Split('|')) {
+                    if ($h -eq 'full=1') { $s.Full = $true } elseif ($h.StartsWith('cur=')) { $s.Currency = $h.Substring(4) }
+                }
+                continue
+            }
+            if ($line.StartsWith('!')) { [void]$s.Absent.Add($line.Substring(1)); continue }
+            $t = $line.IndexOf("`t")
+            if ($t -gt 0) { $s.Prices[$line.Substring(0, $t)] = [double]::Parse($line.Substring($t + 1), [Globalization.CultureInfo]::InvariantCulture) }
+        }
+    } catch { return $null }
+    $script:SheetMem[$Key] = $s
+    $s
+}
+
+function Write-SheetFile([string]$Key, $S) {
+    $script:SheetMem[$Key] = $S
+    if ($NoCache) { return }
+    try {
+        if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null }
+        $w = New-Object IO.StreamWriter((Get-CacheFile "sheet|$Key" '.tsv'), $false, (New-Object Text.UTF8Encoding $false))
+        try {
+            $w.WriteLine("#v1|full=$(if ($S.Full) { 1 } else { 0 })|cur=$($S.Currency)")
+            foreach ($k in $S.Prices.Keys) { $w.WriteLine($k + "`t" + $S.Prices[$k].ToString('R', [Globalization.CultureInfo]::InvariantCulture)) }
+            foreach ($a in $S.Absent) { $w.WriteLine('!' + $a) }
+        } finally { $w.Dispose() }
+    } catch { Write-Warning "Could not write price sheet cache: $($_.Exception.Message)" }
+}
+
+# $Fetch is called with the set of meters still needed, or $null to download the complete sheet.
+function Get-SheetCached([string]$Key, $Meters, [scriptblock]$Fetch, [switch]$Full) {
+    $s = Read-SheetFile $Key
+    if (-not $s) { $s = @{ Prices = @{}; Absent = (New-Object 'System.Collections.Generic.HashSet[string]'); Currency = ''; Full = $false } }
+    if ($Full -and -not $s.Full) {
+        Write-Host '  downloading the COMPLETE price sheet into the local cache (slow, one-off)...'
+        $res = & $Fetch $null
+        foreach ($k in @($res.Prices.Keys)) { $s.Prices[$k] = $res.Prices[$k] }
+        if ($res.Currency) { $s.Currency = $res.Currency }
+        $s.Full = [bool]$res.Complete
+        Write-SheetFile $Key $s
+        Write-Host "  cached $($s.Prices.Count) rates$(if (-not $s.Full) { ' (incomplete: stopped early)' })"
+    } elseif (-not $Full) {
+        $need = New-Object 'System.Collections.Generic.HashSet[string]'
+        if (-not $s.Full) {   # a complete cache already knows every meter: anything missing simply isn't on the sheet
+            foreach ($m in $Meters) { if (-not $s.Prices.ContainsKey($m) -and -not $s.Absent.Contains($m)) { [void]$need.Add($m) } }
+        }
+        if ($need.Count -eq 0) { Write-Host "  price sheet served from local cache ($($s.Prices.Count) rates$(if ($s.Full) { ', complete' }))" }
+        else {
+            Write-Host "  price sheet cache: $($Meters.Count - $need.Count)/$($Meters.Count) meters cached, fetching $($need.Count)"
+            $res = & $Fetch $need
+            foreach ($k in @($res.Prices.Keys)) { $s.Prices[$k] = $res.Prices[$k] }
+            if ($res.Currency) { $s.Currency = $res.Currency }
+            if ($res.Complete) { foreach ($m in $need) { if (-not $res.Prices.ContainsKey($m)) { [void]$s.Absent.Add($m) } } }
+            Write-SheetFile $Key $s
+        }
+    } else { Write-Host "  complete price sheet already cached ($($s.Prices.Count) rates)" }
+    @{ Prices = $s.Prices; Currency = $s.Currency }
+}
+
+# Picks the right price sheet for a subscription (MCA billing profile, or subscription scope for EA/other)
+# and returns it via the cache, or an error string.
+function Get-AgreementSheet([string]$Sub, $Meters, $Sheets, [switch]$Full) {
+    $scope = Get-BillingScope $Sub
+    $isMca = $scope -and $scope.Profile
+    $key = if ($isMca) { "mca|$($scope.Account)|$($scope.Profile)" } elseif ($scope -and $scope.Account) { "ea|$($scope.Account)" } else { "sub|$Sub" }
+    if (-not $Sheets.ContainsKey($key)) {
+        try {
+            if ($isMca) {
+                Write-Host "MCA price sheet for billing profile $($scope.Profile)..."
+                $acct = $scope.Account; $prof = $scope.Profile
+                $Sheets[$key] = Get-SheetCached $key $Meters { param($need) Get-McaPriceMap $acct $prof $need } -Full:$Full
+            } else {
+                Write-Host "No billing profile (EA/other agreement): subscription-scope price sheet via $Sub..."
+                $Sheets[$key] = Get-SheetCached $key $Meters { param($need) Get-SubscriptionPriceMap $Sub $need } -Full:$Full
+            }
+        } catch { $Sheets[$key] = "Agreement price not available: $($_.Exception.Message)" }
     }
-    $need = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($m in $Meters) { if (-not $prices.ContainsKey($m) -and -not $absent.Contains($m)) { [void]$need.Add($m) } }
-    if ($need.Count -eq 0) { Write-Host "  price sheet served from cache ($($Meters.Count) meters)" }
-    else {
-        Write-Host "  price sheet cache: $($Meters.Count - $need.Count)/$($Meters.Count) meters cached, fetching $($need.Count)"
-        $res = & $Fetch $need
-        foreach ($k in @($res.Prices.Keys)) { $prices[$k] = $res.Prices[$k] }
-        if ($res.Currency) { $cur = $res.Currency }
-        if ($res.Complete) { foreach ($m in $need) { if (-not $res.Prices.ContainsKey($m)) { [void]$absent.Add($m) } } }
-        Write-Cache "sheet|$Key" @{ currency = $cur; prices = $prices; absent = @($absent) }
-    }
-    @{ Prices = $prices; Currency = $cur }
+    $Sheets[$key]
 }
 
 function Get-McaPriceMap([string]$Ba, [string]$Bp, $Meters) {
@@ -454,7 +526,7 @@ function Get-McaPriceMap([string]$Ba, [string]$Bp, $Meters) {
                     foreach ($n in $_.PSObject.Properties.Name) { $cols[(Norm $n)] = $n }
                 }
                 $mid = "$($_.($cols['meterid']))".ToLowerInvariant()
-                if (-not $Meters.Contains($mid)) { return }
+                if ($Meters -and -not $Meters.Contains($mid)) { return }
                 if ($cols['pricetype'] -and $_.($cols['pricetype']) -notin 'Consumption', '') { return }
                 if ($cols['tierminimumunits'] -and $_.($cols['tierminimumunits']) -and [double]$_.($cols['tierminimumunits']) -gt 0) { return }
                 if ($map.ContainsKey($mid)) { return }
@@ -553,6 +625,23 @@ if (-not $NonInteractive) {
     if ((Read-Host 'Continue with this account? [Y/n]') -match '^\s*n') { throw 'Cancelled by user.' }
 }
 
+if ($BuildCache) {
+    # Download each agreement's COMPLETE price sheet into the local cache, then stop. Later runs search the cache only.
+    $subs = if ($InputFile) {
+        if (-not (Test-Path $InputFile)) { throw "Input file not found: $InputFile" }
+        Get-Content $InputFile | ForEach-Object { (Split-ResourceId $_).Sub } | Where-Object { $_ } | Select-Object -Unique
+    } else { Get-AzSubscription | Where-Object { $_.State -eq 'Enabled' } | ForEach-Object Id }
+    Write-Host "Building price sheet cache for $(@($subs).Count) subscription(s)..."
+    $sheets = @{}
+    foreach ($sub in $subs) {
+        $r = Get-AgreementSheet $sub $null $sheets -Full
+        if ($r -is [string]) { Write-Warning "$sub : $r" }
+    }
+    Write-Host "Price sheet cache built in $CacheDir (valid for $CacheHours hours). Run again without -BuildCache to price resources."
+    if ($SignOutWhenDone) { [void](Disconnect-AzAccount); Write-Host 'Signed out.' }
+    return
+}
+
 if (-not $InputFile) {
     if ($NonInteractive) { throw '-InputFile is required with -NonInteractive.' }
     $InputFile = (Read-Host 'Path to text file of Azure resource IDs').Trim('"').Trim()
@@ -582,23 +671,8 @@ if (-not $SkipMca) {
     foreach ($e in $entities) { if ($e.Pricing) { foreach ($c in $e.Pricing.Components) { [void]$meters.Add($c.Item.meterId.ToLowerInvariant()) } } }
     $sheets = @{}
     foreach ($sub in ($entities | Where-Object { $_.Pricing -and $_.Pricing.Components.Count } | ForEach-Object Sub | Select-Object -Unique)) {
-        $scope = Get-BillingScope $sub
-        $isMca = $scope -and $scope.Profile
         # MCA: one price sheet per billing profile. EA / other: subscription-scope price sheet, shared per billing account.
-        $key = if ($isMca) { "mca|$($scope.Account)|$($scope.Profile)" } elseif ($scope -and $scope.Account) { "ea|$($scope.Account)" } else { "sub|$sub" }
-        if (-not $sheets.ContainsKey($key)) {
-            try {
-                if ($isMca) {
-                    Write-Host "Downloading MCA price sheet for billing profile $($scope.Profile)..."
-                    $acct = $scope.Account; $prof = $scope.Profile
-                    $sheets[$key] = Get-SheetCached $key $meters { param($need) Get-McaPriceMap $acct $prof $need }
-                } else {
-                    Write-Host "No billing profile (EA/other agreement). Using subscription-scope price sheet via $sub..."
-                    $sheets[$key] = Get-SheetCached $key $meters { param($need) Get-SubscriptionPriceMap $sub $need }
-                }
-            } catch { $sheets[$key] = "Agreement price not available: $($_.Exception.Message)" }
-        }
-        $mca[$sub] = $sheets[$key]
+        $mca[$sub] = Get-AgreementSheet $sub $meters $sheets
     }
 }
 
