@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Prices Azure compute resources (AUD) at Public, MCA, 1-year RI and 3-year RI rates.
+    Prices Azure compute resources (AUD) at Public, agreement (EA/MCA), 1-year RI and 3-year RI rates.
 
 .DESCRIPTION
     Reads a text file of Azure resource IDs (one per line, '#' comments allowed) and writes a CSV.
@@ -15,14 +15,15 @@
 
     Price sources
       Public  : Azure Retail Prices API (https://prices.azure.com), currencyCode=AUD
-      MCA     : Cost Management Price Sheet API
-                POST /providers/Microsoft.Billing/billingAccounts/{ba}/billingProfiles/{bp}
-                     /providers/Microsoft.CostManagement/pricesheets/default/download?api-version=2023-09-01
-                Rates are looked up by meterId (the same meterId the Retail API returns).
-                Enterprise Agreement subscriptions (no billing profile) use the subscription-scope
-                Consumption price sheet instead: GET /subscriptions/{id}/providers/Microsoft.Consumption/
-                pricesheets/default?api-version=2023-05-01. No billing account/profile name is needed.
-                The "MCA Price per Month" column holds the agreement (MCA or EA) rate either way.
+      MCA     : (column name kept) the agreement rate from your EA/MCA price sheet CSV, supplied with
+                -PriceSheetCsv. Expected columns: EnrollmentNumber, MeterId, MeterName, MeterType,
+                MeterCategory, MeterSubCategory, ServiceFamily, Product, SkuID, ProductID, MeterRegion,
+                UnitOfMeasure, PartNumber, EffectiveStartDate, EffectiveEndDate, UnitPrice, BasePrice,
+                MarketPrice, CurrencyCode, IncludedQuantity, OfferId, Term, PriceType
+                (only MeterId and UnitPrice are required). Rows are matched on MeterId - the same meterId the
+                Retail API returns. UnitPrice is per UnitOfMeasure (e.g. "100 Hours"), so it is divided by that
+                quantity. Reservation rows (PriceType/Term) are ignored. The file is streamed and only rows for
+                the meters your resources need are kept, so large sheets load quickly. No price sheet API calls.
       1Y / 3Y : Reservation Order Calculate API
                 POST /providers/Microsoft.Capacity/calculatePrice?api-version=2022-11-01
                 (billingPlan = Upfront so the response is the whole-term total, divided by 12/36).
@@ -31,12 +32,9 @@
                 column gives the reason.
     Savings plans are never considered.
 
-    Caching: retail prices, price sheet rates and successful reservation quotes are cached in memory and in
-    -CacheDir (default %LOCALAPPDATA%\AzurePricingCache) for -CacheHours (default 24). Use -RefreshCache to
-    force fresh lookups or -NoCache to turn the disk cache off. Run once with -BuildCache to download the
-    COMPLETE agreement price sheet into the cache (all subscriptions in -InputFile, or all enabled
-    subscriptions if no file is given) and exit; normal runs then search the local cache with no price sheet calls. Resource details (ARM) are never cached, and
-    failed reservation calculations are not cached so they are retried next run.
+    The CSV is a point-in-time export (e.g. October 2026); the effective date range found in it is printed.
+    Nothing is cached on disk: retail prices and reservation quotes are looked up live on every run. Within a
+    single run, repeated retail lookups, subscription names and reservation catalogs are reused from memory.
 
     All "per month" values are for the full SKU count, using -HoursPerMonth (default 730).
     SKU Count means: VM = 1, App Service Plan = instances, SQL = vCores (DTU = 1), Fabric = 1 (priced per CU).
@@ -44,44 +42,32 @@
     is included in any column, regardless of the VM's OS or Azure Hybrid Benefit setting.
 
 .PARAMETER InputFile            Text file of resource IDs.
+.PARAMETER PriceSheetCsv        EA/MCA price sheet CSV export (prompted for if omitted, unless -SkipMca).
 .PARAMETER OutputFile           CSV path (default: AzurePricing_<timestamp>.csv in the current folder).
-.PARAMETER BillingAccountName   Optional. Override the MCA billing account name (auto-detected per subscription).
-.PARAMETER BillingProfileName   Optional. Override the MCA billing profile name.
-.PARAMETER SkipMca              Don't download the price sheet.
+.PARAMETER SkipMca              Don't use the price sheet CSV (agreement column shows N/A).
 .PARAMETER SkipReservations     Don't price reservations.
 
 .EXAMPLE
-    Connect-AzAccount
-    .\Get-AzurePricing.ps1 -InputFile .\resources.txt -OutputFile .\pricing.csv
+    .\Get-AzurePricing.ps1 -InputFile .\resources.txt -PriceSheetCsv .\pricesheet_oct2026.csv -OutputFile .\pricing.csv
 
 .NOTES
-    Requires Az.Accounts. Needs Reader on the resources; billing profile Reader (or similar) for the
-    price sheet; reservation price calculation needs a user who can purchase reservations on the
-    billing scope (otherwise the reservation price is 0 with the reason in Comments).
+    Requires Az.Accounts and an interactive sign-in. Needs Reader on the resources; reservation price
+    calculation needs a user who can purchase reservations on the billing scope (otherwise the reservation
+    price is 0 with the reason in Comments).
 #>
 [CmdletBinding()]
 param(
     [string]$InputFile,             # prompted for if omitted
+    [string]$PriceSheetCsv,         # EA/MCA price sheet CSV; prompted for if omitted
     [string]$TenantId,              # sign in to / switch to this tenant
     [switch]$UseDeviceAuthentication, # device-code sign-in instead of a browser window
     [switch]$ForceLogin,            # always prompt for sign-in, even if a session already exists
     [switch]$SignOutWhenDone,       # Disconnect-AzAccount when finished
-    [switch]$NonInteractive,        # no prompts (needs -InputFile and an existing session)
+    [switch]$NonInteractive,        # no prompts (needs -InputFile, -PriceSheetCsv and an existing session)
     [string]$OutputFile = (Join-Path (Get-Location) ("AzurePricing_{0:yyyyMMdd_HHmm}.csv" -f (Get-Date))),
-    [string]$BillingAccountName,
-    [string]$BillingProfileName,
     [int]$HoursPerMonth = 730,
     [switch]$SkipMca,
-    [switch]$SkipReservations,
-    [int]$MaxPriceSheetPages = 0,   # EA only: stop paging the price sheet after N pages (1000 rows each); 0 = no limit
-    [string]$CacheDir,              # default: %LOCALAPPDATA%\AzurePricingCache
-    [int]$CacheHours = 24,          # how long cached retail prices, price sheets and reservation quotes stay valid
-    [switch]$RefreshCache,          # ignore existing cache entries (new results are still written)
-    [switch]$NoCache,               # don't read or write the disk cache
-    [switch]$BuildCache,            # pre-load the agreement price sheet(s) into the cache, then exit
-    [string[]]$BuildServices = @('Virtual Machines', 'Azure App Service', 'SQL Database', 'Microsoft Fabric'),
-    [string[]]$BuildRegions  = @('australiaeast', 'australiasoutheast', 'australiacentral'),  # 'all' = every region
-    [switch]$BuildAll               # -BuildCache: keep the entire price sheet, ignoring the service/region filter
+    [switch]$SkipReservations
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,47 +76,13 @@ $script:Days       = $script:Hours / 24
 $script:RetailCache  = @{}
 $script:SubNameCache = @{}
 $script:CatalogCache = @{}
-$script:BillingCache = @{}
-$script:BillingErr   = @{}
-$script:MeterIdRegex = '^[0-9a-fA-F-]{36}$'
 
 function Norm([string]$s) { ($s -replace '[\s_\-]', '').ToLowerInvariant() }
 
-#region Cache (memory + disk, entries expire after -CacheHours)
-if (-not $CacheDir) {
-    $root = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::GetTempPath() }
-    $CacheDir = Join-Path $root 'AzurePricingCache'
-}
-# .NET file APIs resolve relative paths against the process directory, not PowerShell's current location,
-# so make the cache path absolute up front.
-$CacheDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDir)
-$script:MemCache = @{}
-$script:SheetMem = @{}
+# MeterRegion values in the price sheet CSV that represent the Australian Azure regions (the only ones in scope)
+$script:CsvRegions = @('AU Central', 'AU Central 2', 'AU East', 'AU Southeast')
+$script:ArmRegions = @('australiacentral', 'australiacentral2', 'australiaeast', 'australiasoutheast')
 
-function Get-CacheFile([string]$Name, [string]$Ext = '.json') {
-    $h = [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Name))
-    $readable = ($Name -replace '[^A-Za-z0-9]+', '_'); if ($readable.Length -gt 40) { $readable = $readable.Substring(0, 40) }
-    Join-Path $CacheDir ($readable + '_' + ([BitConverter]::ToString($h[0..3]) -replace '-', '') + $Ext)
-}
-
-function Read-Cache([string]$Name, [switch]$NoMem) {
-    if (-not $NoMem -and $script:MemCache.ContainsKey($Name)) { return $script:MemCache[$Name] }
-    if ($NoCache -or $RefreshCache) { return $null }
-    $f = Get-CacheFile $Name
-    if (-not (Test-Path $f)) { return $null }
-    if (((Get-Date) - (Get-Item $f).LastWriteTime).TotalHours -gt $CacheHours) { return $null }
-    try { $o = Get-Content $f -Raw | ConvertFrom-Json; if (-not $NoMem) { $script:MemCache[$Name] = $o }; $o } catch { $null }
-}
-
-function Write-Cache([string]$Name, $Object, [switch]$NoMem) {
-    if (-not $NoMem) { $script:MemCache[$Name] = (ConvertTo-Json -InputObject $Object -Depth 6 -Compress | ConvertFrom-Json) }
-    if ($NoCache) { return }
-    try {
-        if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null }
-        ConvertTo-Json -InputObject $Object -Depth 6 -Compress | Set-Content -Path (Get-CacheFile $Name) -Encoding UTF8
-    } catch { Write-Warning "Could not write cache: $($_.Exception.Message)" }
-}
-#endregion
 
 #region ARM helpers
 function Invoke-Arm {
@@ -177,8 +129,6 @@ function Get-SubscriptionName([string]$SubId) {
 #region Retail prices
 function Get-RetailItems([string]$Filter) {
     if ($script:RetailCache.ContainsKey($Filter)) { return $script:RetailCache[$Filter] }
-    $disk = Read-Cache "retail|$Filter" -NoMem
-    if ($null -ne $disk) { $script:RetailCache[$Filter] = @($disk); return $script:RetailCache[$Filter] }
     $u = 'https://prices.azure.com/api/retail/prices?currencyCode=AUD&api-version=2023-01-01-preview&$filter=' + [uri]::EscapeDataString($Filter)
     $items = New-Object System.Collections.Generic.List[object]
     while ($u) {
@@ -191,7 +141,6 @@ function Get-RetailItems([string]$Filter) {
         $u = $r.NextPageLink
     }
     $script:RetailCache[$Filter] = $items.ToArray()
-    if ($items.Count) { Write-Cache "retail|$Filter" $script:RetailCache[$Filter] -NoMem }
     $script:RetailCache[$Filter]
 }
 #endregion
@@ -317,9 +266,6 @@ function Get-ReservationMonthly($P, [string]$SubId, [string]$Loc, [int]$Years) {
     if ($true) {
         try {
             $sku  = Get-ReservationSkuName $P $SubId $Loc
-            $ck   = "res|$SubId|$($P.ResType)|$sku|$Loc|$Years|$($P.ResQty)"
-            $hit  = Read-Cache $ck
-            if ($hit -and $null -ne $hit.monthly) { return @{ Monthly = [double]$hit.monthly + $P.Uplift; Note = [string]$hit.note } }
             $body = @{
                 sku        = @{ name = $sku }
                 location   = $Loc
@@ -340,7 +286,6 @@ function Get-ReservationMonthly($P, [string]$SubId, [string]$Loc, [int]$Years) {
                 if ($t -and $null -ne $t.amount) {
                     $note = ''
                     if ($t.currencyCode -ne 'AUD') { $note = "${Years}Y reservation returned in $($t.currencyCode), not AUD" }
-                    Write-Cache $ck @{ monthly = ([double]$t.amount / $months); note = $note }
                     return @{ Monthly = ([double]$t.amount / $months) + $P.Uplift; Note = $note }
                 }
                 $why = 'calculatePrice returned no total'
@@ -354,201 +299,93 @@ function Get-ReservationMonthly($P, [string]$SubId, [string]$Loc, [int]$Years) {
 }
 #endregion
 
-#region MCA price sheet
-function Get-BillingScope([string]$SubId) {
-    if ($BillingAccountName) { return @{ Account = $BillingAccountName; Profile = $BillingProfileName } }
-    if (-not $script:BillingCache.ContainsKey($SubId)) {
-        $res = $null
-        try {
-            $bp = (Get-ArmJson "/subscriptions/$SubId/providers/Microsoft.Billing/billingProperty/default?api-version=2020-05-01").properties
-            $res = @{ Account = ($bp.billingAccountId -split '/')[-1]; Profile = ($bp.billingProfileId -split '/')[-1] }
-            if (-not $res.Account) { $res = $null }   # EA: account present, no billing profile
-        } catch { $script:BillingErr[$SubId] = $_.Exception.Message }
-        $script:BillingCache[$SubId] = $res
+#region Agreement price sheet (CSV export)
+# Splits one CSV line into fields (handles "quoted, fields" and "" escapes). Lines without quotes take the fast path.
+function Split-CsvLine([string]$Line) {
+    if ($Line.IndexOf('"') -lt 0) { return $Line.Split(',') }
+    $f = New-Object System.Collections.Generic.List[string]
+    $sb = New-Object Text.StringBuilder; $q = $false
+    for ($i = 0; $i -lt $Line.Length; $i++) {
+        $c = $Line[$i]
+        if ($q) {
+            if ($c -eq '"') { if ($i + 1 -lt $Line.Length -and $Line[$i + 1] -eq '"') { [void]$sb.Append('"'); $i++ } else { $q = $false } }
+            else { [void]$sb.Append($c) }
+        } elseif ($c -eq '"') { $q = $true }
+        elseif ($c -eq ',') { $f.Add($sb.ToString()); [void]$sb.Clear() }
+        else { [void]$sb.Append($c) }
     }
-    $script:BillingCache[$SubId]
+    $f.Add($sb.ToString())
+    $f.ToArray()
 }
 
-# Subscription-scope price sheet (Microsoft.Consumption) - the Enterprise Agreement route; needs no billing profile.
-# unitPrice is per unitOfMeasure (e.g. "100 Hours"), so it is divided by that leading quantity to get a per-unit rate.
-function Get-SubscriptionPriceMap([string]$SubId, $Meters) {
-    $map = @{}; $cur = ''
-    $path = "/subscriptions/$SubId/providers/Microsoft.Consumption/pricesheets/default?api-version=2023-05-01&`$top=1000"
-    $complete = $true
-    $page = 0; $rows = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
-    while ($path) {
-        $page++
-        $j = Get-ArmJson $path
-        $rows += @($j.properties.pricesheets).Count
-        if ($page % 5 -eq 0 -or $page -eq 1) {
-            Write-Host ("  price sheet page {0}: {1} rows scanned, {2}/{3} meters found, {4:N0}s elapsed" -f $page, $rows, $map.Count, $(if ($Meters) { $Meters.Count } else { 'all' }), $sw.Elapsed.TotalSeconds)
-        }
-        if ($MaxPriceSheetPages -gt 0 -and $page -gt $MaxPriceSheetPages) { $complete = $false; Write-Warning "Stopped after $MaxPriceSheetPages price sheet pages ($($map.Count) meters found)"; break }
-        foreach ($r in $j.properties.pricesheets) {
-            $mid = "$($r.meterId)".ToLowerInvariant()
-            if (($Meters -and -not $Meters.Contains($mid)) -or $map.ContainsKey($mid)) { continue }
+# Reads the EA/MCA price sheet CSV (streamed, so large files are fine) and keeps one rate per wanted meterId.
+#   UnitPrice is per UnitOfMeasure (e.g. "100 Hours"), so it is divided by that leading quantity -> rate per single unit.
+#   Reservation / savings-plan rows (PriceType or Term set) are ignored.
+#   If a meter has several rows, the row with the lowest IncludedQuantity wins, then the latest EffectiveStartDate.
+function Import-PriceSheetCsv([string]$Path, $Meters) {
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $reader = New-Object IO.StreamReader($Path, $true)
+    try {
+        $hdr = $reader.ReadLine()
+        if (-not $hdr) { throw "Price sheet CSV is empty: $Path" }
+        $ix = @{}; $names = Split-CsvLine $hdr
+        for ($i = 0; $i -lt $names.Count; $i++) { $ix[(Norm $names[$i])] = $i }
+        foreach ($need in 'meterid', 'unitprice') { if (-not $ix.ContainsKey($need)) { throw "Price sheet CSV has no '$need' column (found: $($names -join ', '))" } }
+        $iMeter = $ix['meterid']; $iPrice = $ix['unitprice']
+        $iUom   = if ($ix.ContainsKey('unitofmeasure'))      { $ix['unitofmeasure'] }      else { -1 }
+        $iType  = if ($ix.ContainsKey('pricetype'))          { $ix['pricetype'] }          else { -1 }
+        $iTerm  = if ($ix.ContainsKey('term'))               { $ix['term'] }               else { -1 }
+        $iInc   = if ($ix.ContainsKey('includedquantity'))   { $ix['includedquantity'] }   else { -1 }
+        $iStart = if ($ix.ContainsKey('effectivestartdate')) { $ix['effectivestartdate'] } else { -1 }
+        $iEnd   = if ($ix.ContainsKey('effectiveenddate'))   { $ix['effectiveenddate'] }   else { -1 }
+        $iCur   = if ($ix.ContainsKey('currencycode'))       { $ix['currencycode'] }       else { -1 }
+        $iEnr   = if ($ix.ContainsKey('enrollmentnumber'))   { $ix['enrollmentnumber'] }   else { -1 }
+        $iReg   = if ($ix.ContainsKey('meterregion'))       { $ix['meterregion'] }       else { -1 }
+        $maxIx  = (@($iMeter, $iPrice, $iUom, $iType, $iTerm, $iInc, $iStart, $iEnd, $iCur, $iEnr, $iReg) | Measure-Object -Maximum).Maximum
+
+        $best = @{}; $cur = ''; $enr = New-Object 'System.Collections.Generic.HashSet[string]'
+        $first = $null; $last = $null
+        $n = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
+        while ($null -ne ($line = $reader.ReadLine())) {
+            if ($line.Length -eq 0) { continue }
+            $n++
+            if ($n % 250000 -eq 0) { Write-Host ("  price sheet CSV: {0:N0} rows read, {1}/{2} meters found, {3:N0}s" -f $n, $best.Count, $Meters.Count, $sw.Elapsed.TotalSeconds) }
+            $f = Split-CsvLine $line
+            if ($f.Count -le $maxIx) { continue }
+            $mid = $f[$iMeter].Trim().ToLowerInvariant()
+            if (-not $Meters.Contains($mid)) { continue }
+            # Only the Australian regions matter; rows with a blank region (global meters) are kept
+            if ($iReg -ge 0 -and $f[$iReg].Trim() -and $f[$iReg].Trim() -notin $script:CsvRegions) { continue }
+            if ($iType -ge 0 -and $f[$iType] -match 'reserv|savings') { continue }
+            if ($iTerm -ge 0 -and $f[$iTerm].Trim() -and $f[$iTerm].Trim() -notmatch '^(0|none|n/?a)$') { continue }
+
+            $price = 0.0
+            if (-not [double]::TryParse($f[$iPrice], [Globalization.NumberStyles]::Float, $inv, [ref]$price)) { continue }
             $div = 1.0
-            if ("$($r.unitOfMeasure)" -match '^\s*([\d,]*\.?\d+)') { $div = [double]($Matches[1] -replace ',', ''); if ($div -le 0) { $div = 1.0 } }
-            $map[$mid] = [double]$r.unitPrice / $div
-            if (-not $cur) { $cur = $r.currencyCode }
-        }
-        if ($Meters -and $map.Count -ge $Meters.Count) { $complete = $false; break }
-        $next = $j.properties.nextLink
-        $path = if ($next) { ([uri]$next).PathAndQuery } else { $null }
-    }
-    @{ Prices = $map; Currency = $cur; Complete = $complete }
-}
+            if ($iUom -ge 0 -and $f[$iUom] -match '^\s*([\d,]*\.?\d+)') { $div = [double]($Matches[1] -replace ',', ''); if ($div -le 0) { $div = 1.0 } }
+            $inc = 0.0
+            if ($iInc -ge 0 -and $f[$iInc]) { [void][double]::TryParse($f[$iInc], [Globalization.NumberStyles]::Float, $inv, [ref]$inc) }
+            $start = [datetime]::MinValue
+            if ($iStart -ge 0 -and $f[$iStart]) { [void][datetime]::TryParse($f[$iStart], $inv, [Globalization.DateTimeStyles]::None, [ref]$start) }
 
-# Price sheet cache, one tab-separated file per sheet: "meterId<TAB>unitPrice" lines, "!meterId" lines for meters
-# confirmed absent, and a header saying whether the file holds the COMPLETE sheet (full=1).
-function Read-SheetFile([string]$Key) {
-    if ($script:SheetMem.ContainsKey($Key)) { return $script:SheetMem[$Key] }
-    if ($NoCache -or $RefreshCache) { return $null }
-    $f = Get-CacheFile "sheet|$Key" '.tsv'
-    if (-not (Test-Path $f)) { return $null }
-    if (((Get-Date) - (Get-Item $f).LastWriteTime).TotalHours -gt $CacheHours) { return $null }
-    $s = @{ Prices = @{}; Absent = (New-Object 'System.Collections.Generic.HashSet[string]'); Currency = ''; Full = $false }
-    try {
-        $first = $true
-        foreach ($line in [IO.File]::ReadLines($f)) {
-            if ($first) {
-                $first = $false
-                foreach ($h in $line.Split('|')) {
-                    if ($h -eq 'full=1') { $s.Full = $true } elseif ($h.StartsWith('cur=')) { $s.Currency = $h.Substring(4) }
-                }
-                continue
-            }
-            if ($line.StartsWith('!')) { [void]$s.Absent.Add($line.Substring(1)); continue }
-            $t = $line.IndexOf("`t")
-            if ($t -gt 0) { $s.Prices[$line.Substring(0, $t)] = [double]::Parse($line.Substring($t + 1), [Globalization.CultureInfo]::InvariantCulture) }
-        }
-    } catch { return $null }
-    $script:SheetMem[$Key] = $s
-    $s
-}
+            $old = $best[$mid]
+            if ($old -and ($inc -gt $old.Inc -or ($inc -eq $old.Inc -and $start -le $old.Start))) { continue }
+            $best[$mid] = @{ Price = $price / $div; Inc = $inc; Start = $start }
 
-function Write-SheetFile([string]$Key, $S) {
-    $script:SheetMem[$Key] = $S
-    if ($NoCache) { return }
-    try {
-        if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null }
-        $w = New-Object IO.StreamWriter((Get-CacheFile "sheet|$Key" '.tsv'), $false, (New-Object Text.UTF8Encoding $false))
-        try {
-            $w.WriteLine("#v1|full=$(if ($S.Full) { 1 } else { 0 })|cur=$($S.Currency)")
-            foreach ($k in $S.Prices.Keys) { $w.WriteLine($k + "`t" + $S.Prices[$k].ToString('R', [Globalization.CultureInfo]::InvariantCulture)) }
-            foreach ($a in $S.Absent) { $w.WriteLine('!' + $a) }
-        } finally { $w.Dispose() }
-        Write-Host "  saved price sheet cache: $(Get-CacheFile "sheet|$Key" '.tsv')"
-    } catch { Write-Warning "Could not write price sheet cache: $($_.Exception.Message)" }
-}
-
-# $Fetch is called with the set of meters still needed, or $null to download the complete sheet.
-function Get-SheetCached([string]$Key, $Meters, [scriptblock]$Fetch, [switch]$Full) {
-    $s = Read-SheetFile $Key
-    if (-not $s) { $s = @{ Prices = @{}; Absent = (New-Object 'System.Collections.Generic.HashSet[string]'); Currency = ''; Full = $false } }
-    if ($Full -and -not $s.Full) {
-        Write-Host '  downloading the COMPLETE price sheet into the local cache (slow, one-off)...'
-        $res = & $Fetch $null
-        foreach ($k in @($res.Prices.Keys)) { $s.Prices[$k] = $res.Prices[$k] }
-        if ($res.Currency) { $s.Currency = $res.Currency }
-        $s.Full = [bool]$res.Complete
-        Write-SheetFile $Key $s
-        Write-Host "  cached $($s.Prices.Count) rates$(if (-not $s.Full) { ' (incomplete: stopped early)' })"
-    } elseif (-not $Full) {
-        $need = New-Object 'System.Collections.Generic.HashSet[string]'
-        if (-not $s.Full) {   # a complete cache already knows every meter: anything missing simply isn't on the sheet
-            foreach ($m in $Meters) { if (-not $s.Prices.ContainsKey($m) -and -not $s.Absent.Contains($m)) { [void]$need.Add($m) } }
-        }
-        if ($need.Count -eq 0) { Write-Host "  price sheet served from local cache ($($s.Prices.Count) rates$(if ($s.Full) { ', complete' }))" }
-        else {
-            Write-Host "  price sheet cache: $($Meters.Count - $need.Count)/$($Meters.Count) meters cached, fetching $($need.Count)"
-            $res = & $Fetch $need
-            foreach ($k in @($res.Prices.Keys)) { $s.Prices[$k] = $res.Prices[$k] }
-            if ($res.Currency) { $s.Currency = $res.Currency }
-            if ($res.Complete) { foreach ($m in $need) { if (-not $res.Prices.ContainsKey($m)) { [void]$s.Absent.Add($m) } } }
-            Write-SheetFile $Key $s
-        }
-    } else { Write-Host "  complete price sheet already cached ($($s.Prices.Count) rates)" }
-    @{ Prices = $s.Prices; Currency = $s.Currency }
-}
-
-# Picks the right price sheet for a subscription (MCA billing profile, or subscription scope for EA/other)
-# and returns it via the cache, or an error string.
-function Get-AgreementSheet([string]$Sub, $Meters, $Sheets, [switch]$Full) {
-    $scope = Get-BillingScope $Sub
-    $isMca = $scope -and $scope.Profile
-    $key = if ($isMca) { "mca|$($scope.Account)|$($scope.Profile)" } elseif ($scope -and $scope.Account) { "ea|$($scope.Account)" } else { "sub|$Sub" }
-    if (-not $Sheets.ContainsKey($key)) {
-        try {
-            if ($isMca) {
-                Write-Host "MCA price sheet for billing profile $($scope.Profile)..."
-                $acct = $scope.Account; $prof = $scope.Profile
-                $Sheets[$key] = Get-SheetCached $key $Meters { param($need) Get-McaPriceMap $acct $prof $need } -Full:$Full
-            } else {
-                Write-Host "No billing profile (EA/other agreement): subscription-scope price sheet via $Sub..."
-                $Sheets[$key] = Get-SheetCached $key $Meters { param($need) Get-SubscriptionPriceMap $Sub $need } -Full:$Full
-            }
-        } catch { $Sheets[$key] = "Agreement price not available: $($_.Exception.Message)" }
-    }
-    $Sheets[$key]
-}
-
-function Get-McaPriceMap([string]$Ba, [string]$Bp, $Meters) {
-    $path = "/providers/Microsoft.Billing/billingAccounts/$Ba/billingProfiles/$Bp/providers/Microsoft.CostManagement/pricesheets/default/download?api-version=2023-09-01"
-    $r = Invoke-Arm -Method POST -Path $path
-    if ($r.StatusCode -notin 200, 202) { throw "Price sheet request failed ($($r.StatusCode)): $($r.Content)" }
-    $url = $null
-    if ($r.StatusCode -eq 200) { $url = ($r.Content | ConvertFrom-Json).downloadUrl }
-    else {
-        $loc  = [string]$r.Headers.Location
-        $wait = 30; try { $wait = [math]::Min(30, [math]::Max(5, [int]$r.Headers.RetryAfter.Delta.TotalSeconds)) } catch { }
-        for ($i = 0; $i -lt 40 -and -not $url; $i++) {
-            Write-Host "  waiting for price sheet ($($i + 1))..."
-            Start-Sleep -Seconds $wait
-            $q = Invoke-AzRestMethod -Method GET -Uri $loc
-            if ($q.StatusCode -eq 200) { $url = ($q.Content | ConvertFrom-Json).downloadUrl }
-            elseif ($q.StatusCode -ne 202) { throw "Price sheet poll failed ($($q.StatusCode)): $($q.Content)" }
-        }
-    }
-    if (-not $url) { throw 'Timed out waiting for the price sheet' }
-
-    $dir = Join-Path ([IO.Path]::GetTempPath()) ("pricesheet_" + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $dir | Out-Null
-    try {
-        $file = Join-Path $dir 'download.bin'
-        Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing
-        $head = [IO.File]::ReadAllBytes($file)[0..1]
-        $csvs = @()
-        if ($head[0] -eq 0x50 -and $head[1] -eq 0x4B) {
-            Rename-Item $file 'download.zip'
-            Expand-Archive -Path (Join-Path $dir 'download.zip') -DestinationPath (Join-Path $dir 'x')
-            $csvs = @(Get-ChildItem (Join-Path $dir 'x') -Recurse -Filter *.csv).FullName
-        } else { Rename-Item $file 'sheet.csv'; $csvs = @(Join-Path $dir 'sheet.csv') }
-
-        $map = @{}; $cur = ''
-        foreach ($csv in $csvs) {
-            $cols = $null
-            Import-Csv -Path $csv | ForEach-Object {
-                if (-not $cols) {
-                    $cols = @{}
-                    foreach ($n in $_.PSObject.Properties.Name) { $cols[(Norm $n)] = $n }
-                }
-                $mid = "$($_.($cols['meterid']))".ToLowerInvariant()
-                if ($Meters -and -not $Meters.Contains($mid)) { return }
-                if ($cols['pricetype'] -and $_.($cols['pricetype']) -notin 'Consumption', '') { return }
-                if ($cols['tierminimumunits'] -and $_.($cols['tierminimumunits']) -and [double]$_.($cols['tierminimumunits']) -gt 0) { return }
-                if ($map.ContainsKey($mid)) { return }
-                $div = 1.0
-                if ($cols['unitofmeasure'] -and "$($_.($cols['unitofmeasure']))" -match '^\s*([\d,]*\.?\d+)') { $div = [double]($Matches[1] -replace ',', ''); if ($div -le 0) { $div = 1.0 } }
-                $map[$mid] = [double]::Parse("$($_.($cols['unitprice']))", [Globalization.CultureInfo]::InvariantCulture) / $div
-                $cc = if ($cols['billingcurrency']) { $cols['billingcurrency'] } elseif ($cols['currency']) { $cols['currency'] } else { $cols['currencycode'] }
-                if ($cc -and -not $cur) { $cur = $_.$cc }
+            if (-not $cur -and $iCur -ge 0) { $cur = $f[$iCur].Trim() }
+            if ($iEnr -ge 0 -and $f[$iEnr]) { [void]$enr.Add($f[$iEnr].Trim()) }
+            if ($start -gt [datetime]::MinValue) {
+                if (-not $first -or $start -lt $first) { $first = $start }
+                $e2 = [datetime]::MinValue
+                if ($iEnd -ge 0 -and [datetime]::TryParse($f[$iEnd], $inv, [Globalization.DateTimeStyles]::None, [ref]$e2) -and (-not $last -or $e2 -gt $last)) { $last = $e2 }
             }
         }
-        @{ Prices = $map; Currency = $cur; Complete = $true }
-    } finally { Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue }
+        $prices = @{}; foreach ($k in $best.Keys) { $prices[$k] = $best[$k].Price }
+        @{ Prices = $prices; Currency = $cur; RowsRead = $n; Enrollments = @($enr); From = $first; To = $last }
+    } finally { $reader.Dispose() }
 }
 #endregion
+
 
 #region Resource discovery
 function Get-Entities([string]$RawId) {
@@ -633,43 +470,20 @@ if (-not $NonInteractive) {
     if ((Read-Host 'Continue with this account? [Y/n]') -match '^\s*n') { throw 'Cancelled by user.' }
 }
 
-if ($BuildCache) {
-    # Download each agreement's COMPLETE price sheet into the local cache, then stop. Later runs search the cache only.
-    $subs = if ($InputFile) {
-        if (-not (Test-Path $InputFile)) { throw "Input file not found: $InputFile" }
-        Get-Content $InputFile | ForEach-Object { (Split-ResourceId $_).Sub } | Where-Object { $_ } | Select-Object -Unique
-    } else { Get-AzSubscription | Where-Object { $_.State -eq 'Enabled' } | ForEach-Object Id }
-    Write-Host "Building price sheet cache for $(@($subs).Count) subscription(s)..."
-    $wanted = $null
-    if (-not $BuildAll) {
-        # The price sheet API has no server-side filter, so work out which meters matter from the Retail API
-        # (the same meterIds appear on the price sheet) and keep only those. Paging stops once all are found.
-        $wanted = New-Object 'System.Collections.Generic.HashSet[string]'
-        $regs = if ($BuildRegions -contains 'all') { @($null) } else { $BuildRegions }
-        foreach ($svc in $BuildServices) {
-            foreach ($rg in $regs) {
-                $flt = "serviceName eq '$svc' and priceType eq 'Consumption'"
-                if ($rg) { $flt += " and armRegionName eq '$rg'" }
-                foreach ($it in (Get-RetailItems $flt)) { [void]$wanted.Add($it.meterId.ToLowerInvariant()) }
-            }
-        }
-        Write-Host "Keeping $($wanted.Count) meters ($($BuildServices -join ', ') in $($BuildRegions -join ', '))"
-    }
-    $sheets = @{}
-    foreach ($sub in $subs) {
-        $r = if ($BuildAll) { Get-AgreementSheet $sub $null $sheets -Full } else { Get-AgreementSheet $sub $wanted $sheets }
-        if ($r -is [string]) { Write-Warning "$sub : $r" }
-    }
-    Write-Host "Price sheet cache built in $CacheDir (valid for $CacheHours hours). Run again without -BuildCache to price resources."
-    if ($SignOutWhenDone) { [void](Disconnect-AzAccount); Write-Host 'Signed out.' }
-    return
-}
 
 if (-not $InputFile) {
     if ($NonInteractive) { throw '-InputFile is required with -NonInteractive.' }
     $InputFile = (Read-Host 'Path to text file of Azure resource IDs').Trim('"').Trim()
 }
 if (-not (Test-Path $InputFile)) { throw "Input file not found: $InputFile" }
+if (-not $SkipMca) {
+    if (-not $PriceSheetCsv) {
+        if ($NonInteractive) { throw '-PriceSheetCsv is required with -NonInteractive (or use -SkipMca).' }
+        $PriceSheetCsv = (Read-Host 'Path to EA/MCA price sheet CSV').Trim('"').Trim()
+    }
+    $PriceSheetCsv = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PriceSheetCsv)   # .NET needs an absolute path
+    if (-not (Test-Path -LiteralPath $PriceSheetCsv)) { throw "Price sheet CSV not found: $PriceSheetCsv" }
+}
 if (-not $NonInteractive -and -not $PSBoundParameters.ContainsKey('OutputFile')) {
     $o = (Read-Host "Output CSV path [$OutputFile]").Trim('"').Trim()
     if ($o) { $OutputFile = $o }
@@ -687,17 +501,19 @@ foreach ($rid in $ids) {
     }
 }
 
-# MCA price sheets (one per billing profile)
-$mca = @{}   # sub -> @{Prices; Currency} or error string
+# Agreement (EA/MCA) rates come from the price sheet CSV, filtered to the meters these resources use
+$agreement = $null
 if (-not $SkipMca) {
     $meters = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($e in $entities) { if ($e.Pricing) { foreach ($c in $e.Pricing.Components) { [void]$meters.Add($c.Item.meterId.ToLowerInvariant()) } } }
-    $sheets = @{}
-    foreach ($sub in ($entities | Where-Object { $_.Pricing -and $_.Pricing.Components.Count } | ForEach-Object Sub | Select-Object -Unique)) {
-        # MCA: one price sheet per billing profile. EA / other: subscription-scope price sheet, shared per billing account.
-        $mca[$sub] = Get-AgreementSheet $sub $meters $sheets
-    }
+    Write-Host "Reading price sheet CSV for $($meters.Count) meter(s): $PriceSheetCsv"
+    $agreement = Import-PriceSheetCsv $PriceSheetCsv $meters
+    Write-Host ("  {0:N0} rows read, {1} meter(s) matched; effective {2:yyyy-MM-dd} to {3:yyyy-MM-dd}; currency {4}; enrollment(s) {5}" -f
+        $agreement.RowsRead, $agreement.Prices.Count, $agreement.From, $agreement.To, $agreement.Currency, ($agreement.Enrollments -join ','))
+    if ($agreement.Enrollments.Count -gt 1) { Write-Warning 'Price sheet CSV contains more than one enrollment number; the best-matching row per meter is used.' }
 }
+
+foreach ($e in $entities) { if ($e.Loc -and $e.Loc -notin $script:ArmRegions) { Write-Warning "$($e.Name) is in '$($e.Loc)', outside the Australian regions (AU Central, AU Central 2, AU East, AU Southeast); agreement prices may be missing." } }
 
 Write-Host 'Pricing...'
 $rows = foreach ($e in $entities) {
@@ -730,7 +546,7 @@ $rows = foreach ($e in $entities) {
             $row['Public Price per Month'] = [math]::Round($pub, 2)
 
             if (-not $SkipMca) {
-                $m = $mca[$e.Sub]
+                $m = $agreement
                 if ($m -is [string]) { $notes.Add($m) }
                 elseif ($m) {
                     $tot = 0.0; $ok = $true
@@ -740,8 +556,8 @@ $rows = foreach ($e in $entities) {
                     }
                     if ($ok) {
                         $row['MCA Price per Month'] = [math]::Round($tot, 2)
-                        if ($m.Currency -and $m.Currency -ne 'AUD') { $notes.Add("MCA price sheet currency is $($m.Currency), not AUD") }
-                    } else { $notes.Add('Meter not found in MCA price sheet') }
+                        if ($m.Currency -and $m.Currency -ne 'AUD') { $notes.Add("Price sheet currency is $($m.Currency), not AUD") }
+                    } else { $notes.Add('Meter not found in the price sheet CSV') }
                 }
             }
         }
