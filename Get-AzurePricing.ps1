@@ -19,6 +19,10 @@
                 POST /providers/Microsoft.Billing/billingAccounts/{ba}/billingProfiles/{bp}
                      /providers/Microsoft.CostManagement/pricesheets/default/download?api-version=2023-09-01
                 Rates are looked up by meterId (the same meterId the Retail API returns).
+                Enterprise Agreement subscriptions (no billing profile) use the subscription-scope
+                Consumption price sheet instead: GET /subscriptions/{id}/providers/Microsoft.Consumption/
+                pricesheets/default?api-version=2023-05-01. No billing account/profile name is needed.
+                The "MCA Price per Month" column holds the agreement (MCA or EA) rate either way.
       1Y / 3Y : Reservation Order Calculate API
                 POST /providers/Microsoft.Capacity/calculatePrice?api-version=2022-11-01
                 (billingPlan = Upfront so the response is the whole-term total, divided by 12/36).
@@ -66,6 +70,7 @@ $script:RetailCache  = @{}
 $script:SubNameCache = @{}
 $script:CatalogCache = @{}
 $script:BillingCache = @{}
+$script:BillingErr   = @{}
 $script:MeterIdRegex = '^[0-9a-fA-F-]{36}$'
 
 function Norm([string]$s) { ($s -replace '[\s_\-]', '').ToLowerInvariant() }
@@ -287,17 +292,40 @@ function Get-ReservationMonthly($P, [string]$SubId, [string]$Loc, [int]$Years) {
 
 #region MCA price sheet
 function Get-BillingScope([string]$SubId) {
-    if ($BillingAccountName -and $BillingProfileName) { return @{ Account = $BillingAccountName; Profile = $BillingProfileName } }
+    if ($BillingAccountName) { return @{ Account = $BillingAccountName; Profile = $BillingProfileName } }
     if (-not $script:BillingCache.ContainsKey($SubId)) {
         $res = $null
         try {
             $bp = (Get-ArmJson "/subscriptions/$SubId/providers/Microsoft.Billing/billingProperty/default?api-version=2020-05-01").properties
             $res = @{ Account = ($bp.billingAccountId -split '/')[-1]; Profile = ($bp.billingProfileId -split '/')[-1] }
-            if (-not $res.Account -or -not $res.Profile) { $res = $null }
-        } catch { }
+            if (-not $res.Account) { $res = $null }   # EA: account present, no billing profile
+        } catch { $script:BillingErr[$SubId] = $_.Exception.Message }
         $script:BillingCache[$SubId] = $res
     }
     $script:BillingCache[$SubId]
+}
+
+# Subscription-scope price sheet (Microsoft.Consumption) - the Enterprise Agreement route; needs no billing profile.
+# unitPrice is per unitOfMeasure (e.g. "100 Hours"), so it is divided by that leading quantity to get a per-unit rate.
+function Get-SubscriptionPriceMap([string]$SubId, $Meters) {
+    $map = @{}; $cur = ''
+    $path = "/subscriptions/$SubId/providers/Microsoft.Consumption/pricesheets/default?api-version=2023-05-01&`$top=1000"
+    while ($path) {
+        $j = Get-ArmJson $path
+        foreach ($r in $j.properties.pricesheets) {
+            $mid = "$($r.meterId)".ToLowerInvariant()
+            if (-not $Meters.Contains($mid) -or $map.ContainsKey($mid)) { continue }
+            $div = 1.0
+            if ("$($r.unitOfMeasure)" -match '^\s*([\d,]*\.?\d+)') { $div = [double]($Matches[1] -replace ',', ''); if ($div -le 0) { $div = 1.0 } }
+            $map[$mid] = [double]$r.unitPrice / $div
+            if (-not $cur) { $cur = $r.currencyCode }
+        }
+        if ($map.Count -ge $Meters.Count) { break }
+        $next = $j.properties.nextLink
+        $path = if ($next) { ([uri]$next).PathAndQuery } else { $null }
+    }
+    if ($map.Count -eq 0) { throw 'subscription price sheet returned no matching meters' }
+    @{ Prices = $map; Currency = $cur }
 }
 
 function Get-McaPriceMap([string]$Ba, [string]$Bp, $Meters) {
@@ -345,7 +373,9 @@ function Get-McaPriceMap([string]$Ba, [string]$Bp, $Meters) {
                 if ($cols['pricetype'] -and $_.($cols['pricetype']) -notin 'Consumption', '') { return }
                 if ($cols['tierminimumunits'] -and $_.($cols['tierminimumunits']) -and [double]$_.($cols['tierminimumunits']) -gt 0) { return }
                 if ($map.ContainsKey($mid)) { return }
-                $map[$mid] = [double]::Parse("$($_.($cols['unitprice']))", [Globalization.CultureInfo]::InvariantCulture)
+                $div = 1.0
+                if ($cols['unitofmeasure'] -and "$($_.($cols['unitofmeasure']))" -match '^\s*([\d,]*\.?\d+)') { $div = [double]($Matches[1] -replace ',', ''); if ($div -le 0) { $div = 1.0 } }
+                $map[$mid] = [double]::Parse("$($_.($cols['unitprice']))", [Globalization.CultureInfo]::InvariantCulture) / $div
                 $cc = if ($cols['billingcurrency']) { $cols['billingcurrency'] } elseif ($cols['currency']) { $cols['currency'] } else { $cols['currencycode'] }
                 if ($cc -and -not $cur) { $cur = $_.$cc }
             }
@@ -444,12 +474,19 @@ if (-not $SkipMca) {
     $sheets = @{}
     foreach ($sub in ($entities | Where-Object { $_.Pricing -and $_.Pricing.Components.Count } | ForEach-Object Sub | Select-Object -Unique)) {
         $scope = Get-BillingScope $sub
-        if (-not $scope) { $mca[$sub] = 'Could not determine billing profile (supply -BillingAccountName/-BillingProfileName)'; continue }
-        $key = "$($scope.Account)|$($scope.Profile)"
+        $isMca = $scope -and $scope.Profile
+        # MCA: one price sheet per billing profile. EA / other: subscription-scope price sheet, shared per billing account.
+        $key = if ($isMca) { "mca|$($scope.Account)|$($scope.Profile)" } elseif ($scope -and $scope.Account) { "ea|$($scope.Account)" } else { "sub|$sub" }
         if (-not $sheets.ContainsKey($key)) {
-            Write-Host "Downloading MCA price sheet for billing profile $($scope.Profile)..."
-            try { $sheets[$key] = Get-McaPriceMap $scope.Account $scope.Profile $meters }
-            catch { $sheets[$key] = "MCA price sheet failed: $($_.Exception.Message)" }
+            try {
+                if ($isMca) {
+                    Write-Host "Downloading MCA price sheet for billing profile $($scope.Profile)..."
+                    $sheets[$key] = Get-McaPriceMap $scope.Account $scope.Profile $meters
+                } else {
+                    Write-Host "No billing profile (EA/other agreement). Reading subscription-scope price sheet via $sub..."
+                    $sheets[$key] = Get-SubscriptionPriceMap $sub $meters
+                }
+            } catch { $sheets[$key] = "Agreement price not available: $($_.Exception.Message)" }
         }
         $mca[$sub] = $sheets[$key]
     }
