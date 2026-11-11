@@ -1,0 +1,107 @@
+# Application_1 infrastructure pipeline (Azure DevOps).
+# Manually run: pick the environment, then Validation -> What-If -> Deploy.
+# Add an approval check on the Azure DevOps environment 'application1-<env>' so a reviewer
+# can read the What-If output before the Deploy stage starts.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: environment
+    displayName: Environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - test
+
+variables:
+  appRoot: $(Build.SourcesDirectory)/Application_1
+  templateFile: $(appRoot)/infra/main.bicep
+  parametersFile: $(appRoot)/environments/${{ parameters.environment }}/${{ parameters.environment }}.bicepparam
+  deploymentName: app1-${{ parameters.environment }}-$(Build.BuildId)
+  ${{ if eq(parameters.environment, 'dev') }}:
+    serviceConnection: sc-application1-dev     # workload identity federation, dev subscription
+    location: australiaeast
+  ${{ if eq(parameters.environment, 'test') }}:
+    serviceConnection: sc-application1-test    # workload identity federation, test subscription
+    location: australiaeast
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  # -------------------------------------------------------------------------------------------
+  - stage: Validation
+    displayName: Validation (${{ parameters.environment }})
+    jobs:
+      - job: Lint
+        displayName: Bicep lint
+        steps:
+          - checkout: self
+
+          - script: |
+              set -euo pipefail
+              az bicep install
+              az bicep version
+              echo "Linting $(templateFile)"
+              az bicep lint --file "$(templateFile)"
+              echo "Building $(parametersFile)"
+              az bicep build-params --file "$(parametersFile)" --stdout > /dev/null
+            displayName: Bicep lint and parameter build
+
+  # -------------------------------------------------------------------------------------------
+  - stage: WhatIf
+    displayName: What-If (${{ parameters.environment }})
+    dependsOn: Validation
+    jobs:
+      - job: WhatIf
+        displayName: What-If
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: az deployment sub what-if
+            inputs:
+              azureSubscription: ${{ variables.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az bicep install
+                az deployment sub what-if \
+                  --name "$(deploymentName)" \
+                  --location "$(location)" \
+                  --template-file "$(templateFile)" \
+                  --parameters "$(parametersFile)" \
+                  --exclude-change-types Ignore NoChange
+
+  # -------------------------------------------------------------------------------------------
+  - stage: Deploy
+    displayName: Deploy (${{ parameters.environment }})
+    dependsOn: WhatIf
+    jobs:
+      - deployment: Deploy
+        displayName: Deploy resources and RBAC
+        environment: application1-${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self   # deployment jobs don't check out source automatically
+
+                - task: AzureCLI@2
+                  displayName: az deployment sub create
+                  inputs:
+                    azureSubscription: ${{ variables.serviceConnection }}
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+                      az bicep install
+                      az deployment sub create \
+                        --name "$(deploymentName)" \
+                        --location "$(location)" \
+                        --template-file "$(templateFile)" \
+                        --parameters "$(parametersFile)" \
+                        --output table
