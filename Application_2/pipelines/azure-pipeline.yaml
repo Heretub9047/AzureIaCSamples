@@ -1,0 +1,130 @@
+# Application_2 infrastructure pipeline (Azure DevOps).
+# Manually run: pick the environment, then Validation -> What-If -> Deploy.
+# Deploy runs the Bicep deployment (resources, then RBAC), then publishes the runbook scripts
+# and links the 6PM pause schedule (non-production only).
+# Add an approval check on the Azure DevOps environment 'application2-<env>' (at least uat and
+# prod) so a reviewer can read the What-If output before the Deploy stage starts.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: environment
+    displayName: Environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - test
+      - uat
+      - prod
+
+variables:
+  appRoot: $(Build.SourcesDirectory)/Application_2
+  templateFile: $(appRoot)/infra/main.bicep
+  parametersFile: $(appRoot)/environments/${{ parameters.environment }}/${{ parameters.environment }}.bicepparam
+  deploymentName: app2-${{ parameters.environment }}-$(Build.BuildId)
+  location: australiaeast
+  # Keep in sync with pauseScheduleTimeZone in the bicepparam files.
+  pauseTimeZone: Australia/Sydney
+  ${{ if eq(parameters.environment, 'dev') }}:
+    serviceConnection: sc-application2-dev
+  ${{ if eq(parameters.environment, 'test') }}:
+    serviceConnection: sc-application2-test
+  ${{ if eq(parameters.environment, 'uat') }}:
+    serviceConnection: sc-application2-uat
+  ${{ if eq(parameters.environment, 'prod') }}:
+    serviceConnection: sc-application2-prod
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  # -------------------------------------------------------------------------------------------
+  - stage: Validation
+    displayName: Validation (${{ parameters.environment }})
+    jobs:
+      - job: Lint
+        displayName: Bicep lint
+        steps:
+          - checkout: self
+
+          - script: |
+              set -euo pipefail
+              # Next 6PM in the schedule's time zone, with the correct UTC offset (handles daylight saving)
+              export PAUSE_SCHEDULE_START=$(TZ="$(pauseTimeZone)" date -d "$(TZ="$(pauseTimeZone)" date -d '+1 day' +%F) 18:00" +%Y-%m-%dT%H:%M:%S%:z)
+              az bicep install
+              az bicep version
+              echo "Linting $(templateFile)"
+              az bicep lint --file "$(templateFile)"
+              echo "Building $(parametersFile)"
+              az bicep build-params --file "$(parametersFile)" --stdout > /dev/null
+            displayName: Bicep lint and parameter build
+
+  # -------------------------------------------------------------------------------------------
+  - stage: WhatIf
+    displayName: What-If (${{ parameters.environment }})
+    dependsOn: Validation
+    jobs:
+      - job: WhatIf
+        displayName: What-If
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: az deployment sub what-if
+            inputs:
+              azureSubscription: ${{ variables.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export PAUSE_SCHEDULE_START=$(TZ="$(pauseTimeZone)" date -d "$(TZ="$(pauseTimeZone)" date -d '+1 day' +%F) 18:00" +%Y-%m-%dT%H:%M:%S%:z)
+                az bicep install
+                az deployment sub what-if \
+                  --name "$(deploymentName)" \
+                  --location "$(location)" \
+                  --template-file "$(templateFile)" \
+                  --parameters "$(parametersFile)" \
+                  --exclude-change-types Ignore NoChange
+
+  # -------------------------------------------------------------------------------------------
+  - stage: Deploy
+    displayName: Deploy (${{ parameters.environment }})
+    dependsOn: WhatIf
+    jobs:
+      - deployment: Deploy
+        displayName: Deploy resources, RBAC and runbooks
+        environment: application2-${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self   # deployment jobs don't check out source automatically
+
+                - task: AzureCLI@2
+                  displayName: az deployment sub create
+                  inputs:
+                    azureSubscription: ${{ variables.serviceConnection }}
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+                      export PAUSE_SCHEDULE_START=$(TZ="$(pauseTimeZone)" date -d "$(TZ="$(pauseTimeZone)" date -d '+1 day' +%F) 18:00" +%Y-%m-%dT%H:%M:%S%:z)
+                      echo "Pause schedule start: ${PAUSE_SCHEDULE_START}"
+                      az bicep install
+                      az deployment sub create \
+                        --name "$(deploymentName)" \
+                        --location "$(location)" \
+                        --template-file "$(templateFile)" \
+                        --parameters "$(parametersFile)" \
+                        --output table
+
+                - task: AzureCLI@2
+                  displayName: Publish runbooks and link pause schedule
+                  inputs:
+                    azureSubscription: ${{ variables.serviceConnection }}
+                    scriptType: bash
+                    scriptLocation: scriptPath
+                    scriptPath: $(appRoot)/pipelines/scripts/publish-runbooks.sh
+                    arguments: $(deploymentName) $(appRoot)/runbooks
