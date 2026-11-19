@@ -49,8 +49,8 @@ param appServicePlanSku = 'P1v3'
 param appServicePlanCapacity = 1
 param appServicePlanZoneRedundant = false
 
-param webApiLinuxFxVersion = 'DOTNETCORE|10.0'
-param functionLinuxFxVersion = 'DOTNET-ISOLATED|10.0'
+param webApiNetFrameworkVersion = 'v10.0'
+param functionNetFrameworkVersion = 'v10.0'
 param functionsWorkerRuntime = 'dotnet-isolated'
 
 param appConfigPurgeProtection = true

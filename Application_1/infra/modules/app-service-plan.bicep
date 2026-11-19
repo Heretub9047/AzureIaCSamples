@@ -1,4 +1,4 @@
-// Linux App Service Plan shared by the Web API and the Function App.
+// Windows App Service Plan shared by the Web API and the Function App.
 
 @description('Name of the App Service Plan.')
 param name string
@@ -23,8 +23,8 @@ module plan 'br/public:avm/res/web/serverfarm:0.7.0' = {
   params: {
     name: name
     location: location
-    kind: 'linux'
-    reserved: true
+    kind: 'windows'
+    reserved: false // true only for Linux plans
     skuName: skuName
     skuCapacity: skuCapacity
     zoneRedundant: zoneRedundant

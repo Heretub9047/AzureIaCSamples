@@ -11,9 +11,9 @@ privately networked Web API and Function App with their data services.
 | 2 subnets in an **existing** VNet (other resource group) | `snet-pe` for private endpoint NICs, `snet-int` delegated to `Microsoft.Web/serverFarms` |
 | Application Insights | Workspace-based, linked to the central Log Analytics workspace |
 | App Configuration | Standard SKU, local auth off, public access off, private endpoint |
-| App Service Plan | Linux Premium v3, shared by the Web API and the Function App |
-| Web API | Linux, system-assigned identity, VNet integration, public access off, private endpoint |
-| Function App | Linux, on the shared plan, identity-based host storage, VNet integration, private endpoint |
+| App Service Plan | Windows Premium v3, shared by the Web API and the Function App |
+| Web API | Windows, system-assigned identity, VNet integration, public access off, private endpoint |
+| Function App | Windows, on the shared plan, identity-based host storage, VNet integration, private endpoint |
 | Function host storage | Shared keys off, public access off, private endpoints for blob/queue/table |
 | Data storage | Shared keys off, public access off, private endpoint for blob |
 | Key Vault | RBAC, purge protection, public access off, private endpoint |
@@ -102,5 +102,5 @@ az deployment sub what-if --location australiaeast --template-file infra/main.bi
   is enabled so they can be added via the module's `keyValues` parameter later.
 - **No app has Key Vault data access.** Add Key Vault Secrets User for an app identity if it
   needs Key Vault references.
-- **Runtime:** defaults to .NET 10 (`DOTNETCORE|10.0` / `DOTNET-ISOLATED|10.0`) because .NET 8
+- **Runtime:** defaults to .NET 10 (`netFrameworkVersion: v10.0`, isolated worker for the Function App) because .NET 8
   support ended in November 2026. Change it per environment in the param files.

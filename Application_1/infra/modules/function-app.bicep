@@ -1,4 +1,4 @@
-// Linux Function App on the shared (dedicated) App Service Plan with system-assigned identity,
+// Windows Function App on the shared (dedicated) App Service Plan with system-assigned identity,
 // identity-based host storage (AzureWebJobsStorage__*), VNet integration for outbound traffic,
 // and a private endpoint for inbound traffic. Public access is disabled.
 
@@ -29,8 +29,8 @@ param appInsightsResourceId string
 @description('Blob endpoint of the separate data storage account the function reads/writes.')
 param dataStorageBlobEndpoint string
 
-@description('Linux runtime stack, e.g. DOTNET-ISOLATED|10.0.')
-param linuxFxVersion string = 'DOTNET-ISOLATED|10.0'
+@description('.NET version on Windows for the isolated worker, e.g. v10.0.')
+param netFrameworkVersion string = 'v10.0'
 
 @description('FUNCTIONS_WORKER_RUNTIME value matching the runtime stack.')
 param functionsWorkerRuntime string = 'dotnet-isolated'
@@ -43,7 +43,7 @@ module functionApp 'br/public:avm/res/web/site:0.24.0' = {
   params: {
     name: name
     location: location
-    kind: 'functionapp,linux'
+    kind: 'functionapp'
     serverFarmResourceId: appServicePlanResourceId
     managedIdentities: {
       systemAssigned: true
@@ -56,7 +56,8 @@ module functionApp 'br/public:avm/res/web/site:0.24.0' = {
     }
     siteConfig: {
       alwaysOn: true // required on a dedicated plan, otherwise triggers stop firing
-      linuxFxVersion: linuxFxVersion
+      netFrameworkVersion: netFrameworkVersion
+      use32BitWorkerProcess: false
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       http20Enabled: true

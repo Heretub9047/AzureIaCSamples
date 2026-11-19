@@ -1,4 +1,4 @@
-// Linux Web API (App Service) with system-assigned identity, VNet integration for outbound
+// Windows Web API (App Service) with system-assigned identity, VNet integration for outbound
 // traffic, and a private endpoint for inbound traffic. Public access is disabled.
 
 @description('Name of the Web API (globally unique).')
@@ -28,8 +28,8 @@ param appConfigEndpoint string
 @description('Blob endpoint of the data storage account the API reads/writes.')
 param dataStorageBlobEndpoint string
 
-@description('Linux runtime stack, e.g. DOTNETCORE|10.0.')
-param linuxFxVersion string = 'DOTNETCORE|10.0'
+@description('.NET version on Windows, e.g. v10.0.')
+param netFrameworkVersion string = 'v10.0'
 
 @description('Tags applied to the resource.')
 param tags object = {}
@@ -39,7 +39,7 @@ module webApi 'br/public:avm/res/web/site:0.24.0' = {
   params: {
     name: name
     location: location
-    kind: 'app,linux'
+    kind: 'app'
     serverFarmResourceId: appServicePlanResourceId
     managedIdentities: {
       systemAssigned: true
@@ -52,7 +52,14 @@ module webApi 'br/public:avm/res/web/site:0.24.0' = {
     }
     siteConfig: {
       alwaysOn: true
-      linuxFxVersion: linuxFxVersion
+      netFrameworkVersion: netFrameworkVersion
+      use32BitWorkerProcess: false
+      metadata: [
+        {
+          name: 'CURRENT_STACK' // shows .NET as the stack in the portal
+          value: 'dotnet'
+        }
+      ]
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       http20Enabled: true

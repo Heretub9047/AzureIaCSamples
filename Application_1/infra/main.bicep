@@ -106,11 +106,11 @@ param appServicePlanCapacity int = 1
 @description('App Service Plan zone redundancy.')
 param appServicePlanZoneRedundant bool = false
 
-@description('Web API Linux runtime stack.')
-param webApiLinuxFxVersion string = 'DOTNETCORE|10.0'
+@description('Web API .NET version (Windows), e.g. v10.0.')
+param webApiNetFrameworkVersion string = 'v10.0'
 
-@description('Function App Linux runtime stack.')
-param functionLinuxFxVersion string = 'DOTNET-ISOLATED|10.0'
+@description('Function App .NET version (Windows, isolated worker), e.g. v10.0.')
+param functionNetFrameworkVersion string = 'v10.0'
 
 @description('Function App worker runtime.')
 param functionsWorkerRuntime string = 'dotnet-isolated'
@@ -316,7 +316,7 @@ module webApi 'modules/web-api.bicep' = {
     appInsightsResourceId: appInsights.outputs.resourceId
     appConfigEndpoint: appConfig.outputs.endpoint
     dataStorageBlobEndpoint: dataStorage.outputs.primaryBlobEndpoint
-    linuxFxVersion: webApiLinuxFxVersion
+    netFrameworkVersion: webApiNetFrameworkVersion
     tags: allTags
   }
 }
@@ -334,7 +334,7 @@ module functionApp 'modules/function-app.bicep' = {
     privateDnsZoneResourceId: privateDnsZoneIds.webApps
     appInsightsResourceId: appInsights.outputs.resourceId
     dataStorageBlobEndpoint: dataStorage.outputs.primaryBlobEndpoint
-    linuxFxVersion: functionLinuxFxVersion
+    netFrameworkVersion: functionNetFrameworkVersion
     functionsWorkerRuntime: functionsWorkerRuntime
     tags: allTags
   }
