@@ -70,4 +70,5 @@ module storage 'br/public:avm/res/storage/storage-account:0.33.1' = {
 
 output name string = storage.outputs.name
 output resourceId string = storage.outputs.resourceId
-output primaryBlobEndpoint string = storage.outputs.primaryBlobEndpoint
+// Not storage.outputs.primaryBlobEndpoint: AVM returns '' for it unless blob containers are declared.
+output primaryBlobEndpoint string = storage.outputs.serviceEndpoints.blob
