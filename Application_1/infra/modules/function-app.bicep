@@ -26,6 +26,9 @@ param privateDnsZoneResourceId string
 @description('Resource ID of Application Insights.')
 param appInsightsResourceId string
 
+@description('Endpoint of the App Configuration store the function reads from.')
+param appConfigEndpoint string
+
 @description('Blob endpoint of the separate data storage account the function reads/writes.')
 param dataStorageBlobEndpoint string
 
@@ -82,6 +85,7 @@ module functionApp 'br/public:avm/res/web/site:0.24.0' = {
         properties: {
           FUNCTIONS_EXTENSION_VERSION: '~4'
           FUNCTIONS_WORKER_RUNTIME: functionsWorkerRuntime
+          AppConfig__Endpoint: appConfigEndpoint
           DataStorage__blobServiceUri: dataStorageBlobEndpoint
         }
       }

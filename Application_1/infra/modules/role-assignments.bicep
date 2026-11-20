@@ -66,6 +66,17 @@ resource webApiDataStorage 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   }
 }
 
+// Function App -> App Configuration: read configuration
+resource functionAppConfigReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(appConfig.id, functionAppPrincipalId, roles.appConfigurationDataReader)
+  scope: appConfig
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.appConfigurationDataReader)
+    principalId: functionAppPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // Function App -> data storage: read/write blobs
 resource functionDataStorage 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(dataStorage.id, functionAppPrincipalId, roles.storageBlobDataContributor)

@@ -27,6 +27,7 @@ in `snet-pe` and registers in the matching **existing central** privatelink DNS 
 |---|---|---|
 | Web API | App Configuration | App Configuration Data Reader |
 | Web API | Data storage | Storage Blob Data Contributor |
+| Function App | App Configuration | App Configuration Data Reader |
 | Function App | Data storage | Storage Blob Data Contributor |
 | Function App | Host storage | Storage Blob Data Owner, Storage Queue Data Contributor, Storage Table Data Contributor |
 

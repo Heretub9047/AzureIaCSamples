@@ -333,6 +333,7 @@ module functionApp 'modules/function-app.bicep' = {
     privateEndpointSubnetResourceId: peSubnet.outputs.resourceId
     privateDnsZoneResourceId: privateDnsZoneIds.webApps
     appInsightsResourceId: appInsights.outputs.resourceId
+    appConfigEndpoint: appConfig.outputs.endpoint
     dataStorageBlobEndpoint: dataStorage.outputs.primaryBlobEndpoint
     netFrameworkVersion: functionNetFrameworkVersion
     functionsWorkerRuntime: functionsWorkerRuntime
